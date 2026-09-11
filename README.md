@@ -8,7 +8,10 @@
 
 ## 当前状态
 
-P0 地基已完成：配置与多 profile、认证、HTTP/SSE 客户端、退出码语义、`api` 逃生舱、`events` 事件流。业务命令（看板、任务、数据源等）尚未实现。
+- **P0 地基** ✅ 配置与多 profile、认证、HTTP/SSE 客户端、退出码语义、`api` 逃生舱、`events` 事件流
+- **P1 看板 REST 轨** ✅ 列表、查看、导出/导入、版本回滚、布局、查询、刷新、筛选、上下文附件
+- **P1 看板 Agent 轨** 待做（`dash new` / `dash edit`，即创建与编辑）
+- 任务、数据源、知识库、项目等其余模块待做，期间可用 `infini-cli api` 直调
 
 ## 环境要求
 
@@ -36,9 +39,53 @@ infini-cli auth login --username alice@example.com
 # 3. 自检：配置、连通性、凭证、授权状态
 infini-cli config doctor --table
 
-# 4. 任意接口直调（业务子命令尚未实现时的通用入口）
+# 4. 看板
+infini-cli dash ls --table
+
+# 5. 任意接口直调（业务子命令尚未实现时的通用入口）
 infini-cli api GET /api/ai/dashboards
 ```
+
+## 看板
+
+看板工作分两轨：**运维**（列表、查询、刷新、版本、布局）走 REST，已经实现；**创作**（把业务需求变成一块看板）走 Agent，因为 spec 背后是一整张 Infini-SQL DAG 和筛选契约，由服务端校验和水合。
+
+```bash
+infini-cli dash ls --table
+infini-cli dash show <id> --table
+infini-cli dash filter ls <id> --table          # 有哪些筛选，怎么传
+infini-cli dash query <id> --filter period=last_30d --filter region=east --table
+infini-cli dash refresh <id> --wait --force-refresh
+infini-cli dash revisions <id> --table
+infini-cli dash rollback <id> --revision 3
+```
+
+### 筛选值
+
+筛选值的 JSON 类型取自看板自己的 spec，所以不用关心该传字符串还是数字：
+
+```bash
+--filter region=east                    # 文本或单选枚举
+--filter tags=a,b                       # 多选枚举，也可重复传 --filter tags=a --filter tags=b
+--filter min_pv=100                      # 数字
+--filter period=2026-01-01..2026-01-31   # 显式日期区间
+--filter period=last_30d                 # 日期区间预设
+--filter-values @filters.json            # 完整报文，优先级高于 --filter
+```
+
+传错筛选名会在本地就报错并列出该看板的合法名字，不用等服务端拒绝。
+
+### spec 往返
+
+```bash
+infini-cli dash export <id> -o board.json
+# 编辑 board.json
+infini-cli dash apply <id> board.json --change-brief "新增转化率卡片"
+```
+
+`export` 会把 `specHash` 写进文件，`apply` 先比对再写，看板被别人改过就中止。这道检查在客户端：REST 接口本身没有乐观锁，所以它挡的是「两个人同时改一块看板」的常见窗口，不是严格的竞态保护。`--force` 可跳过。
+
+`dash import` 与 `dash apply` 都同时接受裸 spec 和导出的 bundle，所以手写的 spec 或从别的部署拷来的 spec 一样能用。
 
 ## 配置
 
@@ -155,6 +202,7 @@ infini-enterprise-cli/
 │   ├── root.go                  # 根命令、全局 flag、退出码收口、确认门
 │   ├── auth.go                  # 登录与凭证
 │   ├── config.go                # 配置、profile、doctor 自检
+│   ├── dash*.go                 # 看板：CRUD、spec 往返、版本布局、查询、刷新
 │   ├── api.go                   # 任意接口直调逃生舱
 │   ├── events.go                # SSE 事件流
 │   ├── helpers.go               # 参数解析、JSON 载荷读取
@@ -165,5 +213,6 @@ infini-enterprise-cli/
     ├── cliexit/                 # 退出码与修复提示
     ├── client/                  # HTTP 封装、响应信封解包、错误分类、SSE
     ├── config/                  # 多 profile 配置与优先级解析
+    ├── dashboard/               # 看板 REST 封装、spec 模型、filter 类型转换
     └── output/                  # JSON / 表格输出
 ```

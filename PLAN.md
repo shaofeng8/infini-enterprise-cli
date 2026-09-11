@@ -127,27 +127,36 @@ CLI 必须照抄这个分工：
 
 REST 轨，`/api/ai/dashboards`：
 
-- [ ] `dash ls [--project]` → `GET /`
-- [ ] `dash show <id> [--spec-only]` → `GET /:id`
-- [ ] `dash import <spec.json>` → `POST /`
-- [ ] `dash apply <id> <spec.json> [--change-brief]` → `PUT /:id`
-- [ ] `dash rm <id>` → `DELETE /:id`
-- [ ] `dash widget rm <id> <widgetId>` → `DELETE /:id/widgets/:widgetId`
-- [ ] `dash revisions <id>` → `GET /:id/revisions`
-- [ ] `dash revision <id> <rev>` → `GET /:id/revisions/:revision`
-- [ ] `dash rollback <id> --revision N` → `POST /:id/rollback`
-- [ ] `dash layout get/set <id>` → `PATCH /:id/layout`
-- [ ] `dash layout commit <id>` → `POST /:id/layout/revision`
-- [ ] `dash query <id> --query-ids ... [--filter k=v]` → `POST /:id/query`
-- [ ] `dash table-query <id> --widget ... --page N` → `POST /:id/table-query`
-- [ ] `dash filter options <id> <name>` → `POST /:id/filter-options`
-- [ ] `dash filter range <id> <name>` → `POST /:id/filter-range`
-- [ ] `dash refresh <id>` → `POST /:id/refreshes`（202）
-- [ ] `dash refresh status <id> <refreshId>` → `GET /:id/refreshes/:refreshId`
-- [ ] `dash refresh active <id>` → `GET /:id/refreshes/active`
-- [ ] `dash refresh result <id> <refreshId> <queryId>` → `GET .../results/:queryId`
-- [ ] `dash refresh cancel <id> <refreshId>` → `DELETE /:id/refreshes/:refreshId`
-- [ ] `dash ask <id> [--widget]` → `POST /:id/ask`（生成上下文附件）
+- [x] `dash ls [--project]` → `GET /`
+- [x] `dash show <id> [--spec]` → `GET /:id`，附带 filter / query / widget 摘要
+- [x] `dash export <id> [-o file] [--spec-only] [--revision N]` → 导出可回写的 bundle
+- [x] `dash import <spec.json>` → `POST /`（兼容裸 spec 与 bundle 两种输入）
+- [x] `dash apply <id> <spec.json> [--change-brief]` → `PUT /:id`，带客户端 specHash 冲突检查
+- [x] `dash rm <id>` → `DELETE /:id`
+- [x] `dash widget ls <id>`、`dash widget rm <id> <widgetId>` → `DELETE /:id/widgets/:widgetId`
+- [x] `dash revisions <id>` → `GET /:id/revisions`
+- [x] `dash revision <id> <rev>` → `GET /:id/revisions/:revision`
+- [x] `dash rollback <id> --revision N` → `POST /:id/rollback`
+- [x] `dash layout get/set <id>` → `PATCH /:id/layout`，本地校验 12 栅格与 widget id
+- [x] `dash layout commit <id>` → `POST /:id/layout/revision`
+- [x] `dash query <id> [--query-ids ...] [--filter k=v]` → `POST /:id/query`，默认跑全部数据查询
+- [x] `dash table-query <id> --widget ... --page N` → `POST /:id/table-query`
+- [x] `dash filter ls <id>` → 从 spec 列出 filter 及传参示例
+- [x] `dash filter options <id> <name>` → `POST /:id/filter-options`
+- [x] `dash filter range <id> <name>` → `POST /:id/filter-range`
+- [x] `dash refresh <id> [--wait]` → `POST /:id/refreshes`（202）+ 轮询到终态
+- [x] `dash refresh status <id> <refreshId>` → `GET /:id/refreshes/:refreshId`
+- [x] `dash refresh active <id>` → `GET /:id/refreshes/active`（无任务返回 null，非错误）
+- [x] `dash refresh result <id> <refreshId> <queryId>` → `GET .../results/:queryId`
+- [x] `dash refresh cancel <id> <refreshId>` → `DELETE /:id/refreshes/:refreshId`
+- [x] `dash ask <id> [--widget]` → `POST /:id/ask`（生成上下文附件）
+
+REST 轨实现要点：
+
+- **filter 值按 spec 声明的类型转换**：`number` 转 JSON number、`daterange` 转 `{start,end}` 或 `{preset}`、多选 enum 转数组。靠文本形状猜类型两个方向都会错（`number` 拒绝字符串 `"10"`，`text` 拒绝数字 `10`），所以先读 spec 再转，未知 filter 名在本地就报错并列出合法名字。
+- **`apply` 的冲突检查是客户端的**：REST `PUT` 的 DTO 不接受 `expected_spec_hash`（只有 Agent 轨的 `dashboard_submit` 有），所以 `export` 把 specHash 写进 bundle，`apply` 先比对再写，`--force` 可跳过。这挡住「两个人同时改一块看板」的常见窗口，不是严格的竞态保护。
+- **`query` 默认排除 `filter_options` 查询**：这类查询只用于填充筛选下拉，query 接口会直接拒绝。
+- **部分失败不算失败**：单个 query 失败在结果里逐条报告，只有全部失败才以退出码 1 结束。
 
 Agent 轨：
 
@@ -328,10 +337,12 @@ Agent 轨：
 
 REST 运维轨与 Agent 创作轨**同期交付**。
 
-- [ ] §4.2 REST 轨 21 个命令
+- [x] §4.2 REST 轨全部命令（含 `dash export`、`dash widget ls`、`dash filter ls` 三个清单外的补充命令）
+- [x] spec 本地往返（export → 编辑 → import / apply，带 `specHash` 冲突检测）
+- [x] 看板刷新的长轮询（`--wait`，进度写 stderr，终态决定退出码）
+- [x] filter 类型转换、请求报文与错误码映射的单元与集成测试
 - [ ] §4.2 Agent 轨 `dash new` / `dash edit`，默认非交互 `--brief`，`--interactive` 为可选引导模式
-- [ ] spec 本地往返（export → 编辑 → import / apply，带 `specHash` 冲突检测）
-- [ ] 看板刷新的长轮询与进度条渲染
+- [ ] 流式渲染 `dashboard_read_result` / `dashboard_submit_result`，`dashboard_submit` 被拒时逐条输出 `errors[]`
 
 ### P2 — 资源与数据面
 
