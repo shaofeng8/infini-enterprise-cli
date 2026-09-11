@@ -160,12 +160,22 @@ REST 轨实现要点：
 
 Agent 轨：
 
-- [ ] `dash new --brief "..."` → `newTask`，**默认非交互**：一条 brief 让 Agent 建完，CI 友好
-- [ ] `dash new --interactive` → 注入 `newViaChatPrompt` 引导提示词，走多轮确认（可选模式）
-- [ ] `dash edit <id> --brief "..."` → `newTask`，先 `dashboard_read` 再 patch
-- [ ] `dash chat <id>` → `dash ask` 产出上下文后接入 `task ask`
-- [ ] 流式渲染 `dashboard_read_result` / `dashboard_submit_result` 两类事件
-- [ ] `dashboard_submit` 被拒时把 `errors[]` 逐条可读化输出
+- [x] `dash new --brief "..."` → `newTask`，**默认非交互**：一条 brief 让 Agent 建完，CI 友好
+- [x] `dash new --guided --interactive` → 注入与 Web 端一致的引导提示词，走多轮确认
+- [x] `dash edit <id> --brief "..."` → `newTask`，先 `dashboard_read` 再 patch；发起前先校验 `canWrite`
+- [x] `dash chat <id> --question "..."` → `dash ask` 产出上下文后内联进 prompt，并挂上 pack 里的数据库与项目
+- [x] `dash reply <taskId> [message] [--approve|--reject]` → `askResponse`，回答 Agent 的提问
+- [x] `dash cancel <taskId>` → `cancelTask`
+- [x] 流式渲染 `dashboard_read_result` / `dashboard_submit_result` 两类事件
+- [x] `dashboard_submit` 被拒时把 `errors[]` 逐条可读化输出（含 spec 路径与错误码）
+
+Agent 轨实现要点（`internal/agent`）：
+
+- **必须先订阅 SSE 再发命令**：命令可能在后来的订阅者接上之前就跑完，那条结果就永久丢了。这条顺序有测试兜住。
+- **`clientOperationId` 幂等 + `commandId` 跟踪**：一条 SSE 连接承载该用户的**全部**命令（含其他终端和浏览器标签），所以 `command.state` 事件按 `clientOperationId` 过滤，不是自己的不处理。
+- **`state.ready` 后按 `GET /api/ai/state` 对账**：流可能被中途掐断，任务自身的状态才是权威，退出前统一回读一次。
+- **模型参数可选但必须成对**：服务端只在传了其中一个时才校验配对，不传则沿用账号配置；`subAgentModelInheritMain=false` 时必须给出子 Agent 模型。这些在本地就拦。
+- **提问一律结束当前流**：回答是同一任务上的一条新命令（新幂等键、新流），所以多轮循环放在 `Converse` 里，交互与非交互共用一条代码路径。
 
 ### 4.3 `infini task` — 任务
 
@@ -330,8 +340,8 @@ Agent 轨：
 - [x] `infini-cli api` 逃生舱 + `api endpoints` 索引
 - [x] `infini-cli events` SSE 订阅器（过滤、退避重连、鉴权失败不重试）
 - [x] 配置优先级与 profile 行为的回归测试
-- [ ] 命令状态机 `internal/agent`（`clientOperationId` 幂等 + `commandId` 跟踪 + `state.ready` 对账）→ 与 P1 Agent 轨同期落地
-- [ ] 针对真实部署的 `auth login` / `doctor` 端到端验证（需要本地 Infini + proxy 起服务）
+- [x] 命令状态机 `internal/agent`（`clientOperationId` 幂等 + `commandId` 跟踪 + `state.ready` 对账）
+- [ ] 针对真实部署的 `auth login` / `doctor` / `dash new` 端到端验证（需要本地 Infini + proxy 起服务）
 
 ### P1 — 看板（核心交付）
 
@@ -341,8 +351,9 @@ REST 运维轨与 Agent 创作轨**同期交付**。
 - [x] spec 本地往返（export → 编辑 → import / apply，带 `specHash` 冲突检测）
 - [x] 看板刷新的长轮询（`--wait`，进度写 stderr，终态决定退出码）
 - [x] filter 类型转换、请求报文与错误码映射的单元与集成测试
-- [ ] §4.2 Agent 轨 `dash new` / `dash edit`，默认非交互 `--brief`，`--interactive` 为可选引导模式
-- [ ] 流式渲染 `dashboard_read_result` / `dashboard_submit_result`，`dashboard_submit` 被拒时逐条输出 `errors[]`
+- [x] §4.2 Agent 轨 `dash new` / `dash edit` / `dash chat` / `dash reply` / `dash cancel`
+- [x] 流式渲染 `dashboard_read_result` / `dashboard_submit_result`，`dashboard_submit` 被拒时逐条输出 `errors[]`
+- [x] 命令状态机 `internal/agent`（订阅先行、幂等键、`command.state` 过滤、`state.ready` 对账），含假服务测试
 
 ### P2 — 资源与数据面
 

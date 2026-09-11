@@ -10,7 +10,7 @@
 
 - **P0 地基** ✅ 配置与多 profile、认证、HTTP/SSE 客户端、退出码语义、`api` 逃生舱、`events` 事件流
 - **P1 看板 REST 轨** ✅ 列表、查看、导出/导入、版本回滚、布局、查询、刷新、筛选、上下文附件
-- **P1 看板 Agent 轨** 待做（`dash new` / `dash edit`，即创建与编辑）
+- **P1 看板 Agent 轨** ✅ 创建、编辑、提问、回答、取消
 - 任务、数据源、知识库、项目等其余模块待做，期间可用 `infini-cli api` 直调
 
 ## 环境要求
@@ -48,7 +48,40 @@ infini-cli api GET /api/ai/dashboards
 
 ## 看板
 
-看板工作分两轨：**运维**（列表、查询、刷新、版本、布局）走 REST，已经实现；**创作**（把业务需求变成一块看板）走 Agent，因为 spec 背后是一整张 Infini-SQL DAG 和筛选契约，由服务端校验和水合。
+看板工作分两轨：**运维**（列表、查询、刷新、版本、布局）走 REST；**创作**（把业务需求变成一块看板）走 Agent，因为 spec 背后是一整张 Infini-SQL DAG 和筛选契约，由服务端校验和水合。
+
+### 创建与编辑
+
+```bash
+infini-cli dash new --brief "近 30 天各渠道 GMV 与转化率趋势" --database db_sales
+infini-cli dash edit dash_123 --brief "把转化率卡片换成折线图，并加上环比"
+infini-cli dash chat dash_123 --question "为什么华东转化率比上月低？" --filter period=last_30d
+```
+
+**默认非交互**，为的是 CI 可预期：Agent 提问时命令会停下来把问题打出来，以退出码 1 结束，你再回答：
+
+```bash
+infini-cli dash reply <taskId> "用自然月，不要滚动 30 天"
+infini-cli dash reply <taskId> --approve          # 审批类提问
+```
+
+想在终端里直接对话，加 `-i`；想让 Agent 先反过来梳理需求再动手，用 `--guided -i`（引导提示词与 Web 端一致）：
+
+```bash
+infini-cli dash new --brief "销售看板" --guided -i
+```
+
+进度流写 stderr，stdout 只有一份 JSON 结果，所以管道里解析不会被干扰。`--quiet` 关掉进度，`--reasoning` 打开思考过程，`--transcript` 把完整对话放进结果。
+
+Agent 提交被服务端拒绝时，会逐条列出被拒的 spec 路径和错误码，而不是只说一句失败：
+
+```
+dashboard submit rejected with 2 error(s):
+  widgets[0].query_id [UNKNOWN_QUERY] query q_x does not exist
+  filters[1] [BAD_NAME] filter name must be snake_case
+```
+
+### 运维
 
 ```bash
 infini-cli dash ls --table
@@ -170,7 +203,11 @@ infini-cli auth logout
 
 ## 事件流
 
-Agent 命令通道是异步的：`POST /api/ai/message` 只入队并立即返回，执行结果只通过 SSE 推送。`events` 是这条流的原始视图：
+Agent 命令通道是异步的：`POST /api/ai/message` 只入队并立即返回，执行结果只通过 SSE 推送。所以 `dash new` 这类命令内部一律是「先订阅、再发命令、消费到终态、最后按 `GET /api/ai/state` 对账」—— 顺序不能反，命令可能在后来的订阅者接上之前就跑完，那条结果就永久丢了。
+
+一条 SSE 连接承载该用户的全部命令（包括其他终端和浏览器标签发起的），所以 `command.state` 事件按 `clientOperationId` 过滤，不是本次运行的不处理。
+
+`events` 是这条流的原始视图：
 
 ```bash
 infini-cli events                                  # 全部事件
@@ -202,13 +239,14 @@ infini-enterprise-cli/
 │   ├── root.go                  # 根命令、全局 flag、退出码收口、确认门
 │   ├── auth.go                  # 登录与凭证
 │   ├── config.go                # 配置、profile、doctor 自检
-│   ├── dash*.go                 # 看板：CRUD、spec 往返、版本布局、查询、刷新
+│   ├── dash*.go                 # 看板：CRUD、spec 往返、版本布局、查询、刷新、Agent 创作
 │   ├── api.go                   # 任意接口直调逃生舱
 │   ├── events.go                # SSE 事件流
 │   ├── helpers.go               # 参数解析、JSON 载荷读取
 │   ├── term.go                  # TTY 检测与无回显输入
 │   └── version.go
 └── internal/
+    ├── agent/                   # 异步命令状态机、SSE 流渲染、看板工具结果解析
     ├── auth/                    # proxy 登录链（md5 口令、JWT、profile）
     ├── cliexit/                 # 退出码与修复提示
     ├── client/                  # HTTP 封装、响应信封解包、错误分类、SSE
