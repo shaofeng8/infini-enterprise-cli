@@ -20,6 +20,19 @@ func readAllStdin() (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
+// readTextFile resolves a text payload from a file path, or from stdin when the
+// path is "-".
+func readTextFile(path string) (string, error) {
+	if path == "-" {
+		return readAllStdin()
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", cliexit.Usage("cannot read %q: %v", path, err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
 // normalizeRaw decodes raw JSON so it nests inside a result object instead of
 // being emitted as an escaped string.
 func normalizeRaw(raw json.RawMessage) any {

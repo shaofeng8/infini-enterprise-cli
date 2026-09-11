@@ -113,8 +113,8 @@ var apiEndpointsCmd = &cobra.Command{
 			{"group": "runtime", "prefix": "/api/runtime", "notes": "instances, execution, drain, autoscaling"},
 			{"group": "license", "prefix": "/api/license", "notes": "status, refresh, limits"},
 			{"group": "browser", "prefix": "/api/ai_browser", "notes": "sessions and actions"},
-			{"group": "storage", "prefix": "/api/storage", "notes": "download, delete"},
-			{"group": "upload", "prefix": "/api", "notes": "directories, fileTree, upload, taskUpload"},
+			{"group": "storage", "prefix": "/api/tools/storage", "notes": "download, downloadTaskFile, delete"},
+			{"group": "upload", "prefix": "/api/tools", "notes": "directories, fileTree, taskFileTree, upload, taskUpload"},
 			{"group": "chunked upload", "prefix": "/api/file_upload", "notes": "init, status, chunks, complete, abort"},
 			{"group": "auth", "prefix": "/api/auth", "notes": "getAuthingPath, getBrand"},
 		}

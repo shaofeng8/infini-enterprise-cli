@@ -181,21 +181,29 @@ Agent 轨实现要点（`internal/agent`）：
 
 `/api/ai_task`：
 
-- [ ] `task ls` → `GET /list`；`task statuses` → `POST /statuses`
-- [ ] `task show <id>` → `GET /showTaskWithId/:id`；`task info <id>` → `GET /getTaskInfo/:id`
-- [ ] `task rm <id...>` → `POST /deleteTaskWithId`
-- [ ] `task cancel <id>` → `POST /cancelTask`
-- [ ] `task pin <id>` → `POST /setPinned`
-- [ ] `task graph <id>` → `GET /tasks/:taskId/notebook-graph`
-- [ ] `task sql <id> --node ...` → `POST /native-query-sql`（展开 `infini_ref` 得原生 SQL）
-- [ ] `task kpi-sql` → `POST /runKpiSql`
-- [ ] `task share set/get` → `POST /setShare`、`GET /shareStatus`
-- [ ] `task evidence` → `POST /toolEvidence`
-- [ ] `task msg <id>` → `GET /getUiMessageById`、`GET /messagePayload`
-- [ ] `task workspace <id>` → `GET /getTaskWorkspace/:id`
-- [ ] `task file ls/preview/download` → `GET /tools/taskFileTree/:taskId`、`POST /previewFile`、storage 下载
-- [ ] `task zip <id>` → `GET /downloadZip`
-- [ ] `task public *` → `publicTask`、`publicMessagePayload`、`publicToolEvidence`、`publicTaskFileTree`、`publicPreviewFile`、`publicDownloadTaskFile`、`publicDownloadZip`
+- [x] `task ls` → `GET /list`；`task status <id...>` → `POST /statuses`
+- [x] `task show <id>` → `GET /showTaskWithId/:id`；`task info <id>` → `GET /getTaskInfo/:id`；`task data <id>` → `GET /tasks?taskId=`
+- [x] `task rm <id...>` → `POST /deleteTaskWithId`
+- [x] `task cancel <id>` → `POST /cancelTask`
+- [x] `task pin <id>` / `task unpin <id>` → `POST /setPinned`
+- [x] `task graph <id>` → `GET /tasks/:taskId/notebook-graph`
+- [x] `task sql <id> --view ...` → `POST /native-query-sql`（展开 `infini_ref` 得原生 SQL）
+- [x] `task kpi-sql` → `POST /runKpiSql`
+- [x] `task share set/get` → `POST /setShare`、`GET /shareStatus`
+- [x] `task evidence` → `POST /toolEvidence`
+- [x] `task msg <id>` → `GET /getUiMessageById`、`GET /messagePayload`
+- [x] `task workspace <id>` → `GET /getTaskWorkspace/:id`
+- [x] `task file ls/preview/get` → `GET /api/tools/taskFileTree/:taskId`、`POST /previewFile`、`GET /api/tools/storage/downloadTaskFile/:taskId`
+- [x] `task zip <id>` → `GET /downloadZip`
+- [ ] `task public *` → `publicTask`、`publicMessagePayload`、`publicToolEvidence`、`publicTaskFileTree`、`publicPreviewFile`、`publicDownloadTaskFile`、`publicDownloadZip`（挪到 P4，属分享/审计面）
+
+#### task 轨实现要点（`internal/task`）
+
+- **文件路由不在 `ai_task` 下**：`tools.module.ts` 用 `RouterModule` 把 upload/storage 挂到 `tools` 前缀，所以文件树是 `/api/tools/taskFileTree/:taskId`，下载是 `/api/tools/storage/downloadTaskFile/:taskId?path=`。之前 `api endpoints` 索引里的 `/api/storage`、`/api` 两条前缀是错的，已改。
+- **`cancelTask` 是 POST 但 id 走 query**：控制器用 `@Query('taskId')`，body 留空；有测试钉住这一点，否则服务端收不到 id。
+- **`runKpiSql` 的 `databases` / `tables` 是字符串不是数组**：DTO 上是 `@IsString()`，内容为 JSON 文本，所以 CLI 收 `--db` / `--table` 后自己 `json.Marshal` 成字符串再发。
+- **列表只发已设置的筛选**：空 `task_name` 会变成对全部任务的模糊匹配，空值一律不上线；`audit` 按 web 的约定发 `1`，`project_ids` 逗号拼接，`--project` 自动推出 `project_filter=project`。
+- **下载走流式落盘**：任务归档可能很大，`client.Download` 直接 `io.Copy` 到文件而不进内存；中途失败会删掉半个文件，因为截断的归档看起来像正常结果。
 
 ### 4.4 `infini agent` — Agent 命令全集
 
@@ -357,7 +365,7 @@ REST 运维轨与 Agent 创作轨**同期交付**。
 
 ### P2 — 资源与数据面
 
-- [ ] §4.3 task 全量
+- [x] §4.3 task 全量（`public *` 一组挪到 P4）
 - [ ] §4.5 db 全量
 - [ ] §4.6 rag 全量
 - [ ] §4.7 project 全量

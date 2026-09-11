@@ -11,7 +11,8 @@
 - **P0 地基** ✅ 配置与多 profile、认证、HTTP/SSE 客户端、退出码语义、`api` 逃生舱、`events` 事件流
 - **P1 看板 REST 轨** ✅ 列表、查看、导出/导入、版本回滚、布局、查询、刷新、筛选、上下文附件
 - **P1 看板 Agent 轨** ✅ 创建、编辑、提问、回答、取消
-- 任务、数据源、知识库、项目等其余模块待做，期间可用 `infini-cli api` 直调
+- **P2 任务** ✅ 列表/查看、状态、置顶、取消、删除、DAG、原生 SQL、KPI SQL、证据、消息、工作区文件与归档、分享
+- 数据源、知识库、项目等其余模块待做，期间可用 `infini-cli api` 直调
 
 ## 环境要求
 
@@ -119,6 +120,58 @@ infini-cli dash apply <id> board.json --change-brief "新增转化率卡片"
 `export` 会把 `specHash` 写进文件，`apply` 先比对再写，看板被别人改过就中止。这道检查在客户端：REST 接口本身没有乐观锁，所以它挡的是「两个人同时改一块看板」的常见窗口，不是严格的竞态保护。`--force` 可跳过。
 
 `dash import` 与 `dash apply` 都同时接受裸 spec 和导出的 bundle，所以手写的 spec 或从别的部署拷来的 spec 一样能用。
+
+## 任务
+
+一个任务就是一次 Agent 对话，外加它产出的全部东西：查询构成的 notebook DAG、独立的工作目录、每个结果背后的工具证据。任务由 `dash new` 这类 Agent 命令创建，`task` 负责创建之后的一切。
+
+```bash
+infini-cli task ls --table
+infini-cli task ls --status running --table
+infini-cli task status t_1 t_2 --table          # 只读状态，批量轮询用这个，不拉对话
+infini-cli task show t_1                         # 含完整对话
+infini-cli task cancel t_1
+infini-cli task pin t_1
+```
+
+### 结果溯源
+
+一个数字是怎么算出来的，靠 DAG 和证据回答，不用重跑任务：
+
+```bash
+infini-cli task graph t_1                                 # 节点与依赖
+infini-cli task sql t_1 --view kpi_monthly_sales           # 展开 infini_ref 得到原生 SQL
+infini-cli task evidence t_1 --id ev_1 --include-subagent  # 工具调用的入参与出参
+infini-cli task msg t_1 --ts 1736200000000                 # 列表里被截断的消息全文
+```
+
+`task kpi-sql` 可以在存进语义层之前先验证一条 KPI 的 SQL。源表按 `<库>.<表>` 传入，语句里用 `<库>_<表>` 引用，与服务端的注册约定一致：
+
+```bash
+infini-cli task kpi-sql --db chinook --table chinook.artists \
+    --sql "SELECT count(*) FROM chinook_artists"
+```
+
+### 工作区文件
+
+图表、导出、中间数据都落在任务自己的工作目录里：
+
+```bash
+infini-cli task file ls t_1 --files-only --table
+infini-cli task file preview t_1 data/result.csv   # 解析后的预览，表格会按行返回
+infini-cli task file get t_1 charts/sales.png --out ./downloads/
+infini-cli task zip t_1 --out ./t_1.zip
+```
+
+下载是流式落盘，大归档不受内存限制；中途失败会删掉半个文件，因为截断的归档看起来像正常结果。
+
+### 分享
+
+```bash
+infini-cli task share get t_1 --table
+infini-cli task share set t_1 --public     # 需确认：任何拿到链接的人都能读
+infini-cli task share set t_1 --private
+```
 
 ## 配置
 
@@ -240,6 +293,7 @@ infini-enterprise-cli/
 │   ├── auth.go                  # 登录与凭证
 │   ├── config.go                # 配置、profile、doctor 自检
 │   ├── dash*.go                 # 看板：CRUD、spec 往返、版本布局、查询、刷新、Agent 创作
+│   ├── task*.go                 # 任务：生命周期、DAG 与证据溯源、工作区文件
 │   ├── api.go                   # 任意接口直调逃生舱
 │   ├── events.go                # SSE 事件流
 │   ├── helpers.go               # 参数解析、JSON 载荷读取
@@ -252,5 +306,6 @@ infini-enterprise-cli/
     ├── client/                  # HTTP 封装、响应信封解包、错误分类、SSE
     ├── config/                  # 多 profile 配置与优先级解析
     ├── dashboard/               # 看板 REST 封装、spec 模型、filter 类型转换
+    ├── task/                    # 任务 REST 封装、文件树、流式下载
     └── output/                  # JSON / 表格输出
 ```
