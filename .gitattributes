@@ -1,0 +1,7 @@
+# Go tooling (gofmt, go vet) expects LF, and the Makefile is consumed by make on
+# macOS/Linux where CRLF breaks recipe parsing.
+*.go text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf
+*.sh text eol=lf
+Makefile text eol=lf
