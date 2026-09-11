@@ -207,23 +207,57 @@ Agent 轨实现要点（`internal/agent`）：
 
 ### 4.4 `infini agent` — Agent 命令全集
 
-`POST /api/ai/message`，30 种 type 全覆盖：
+`POST /api/ai/message`，**24 种真实生效的 type 全覆盖**（原清单写的 30 种与当前服务端不符，见下方实现要点）：
 
-- [ ] `agent new` (`newTask`)、`agent ask` (`askResponse`)、`agent options` (`optionsResponse`)
-- [ ] `agent approve` / `agent deny` (`askResponse` + `yesButtonClicked` / `noButtonClicked`)
-- [ ] `agent cancel` (`cancelTask`)、`agent clear` (`clearTask`)、`agent stop-shell` (`stopShellSession`)
-- [ ] `agent stop-tool` (`stopToolExecution`)、`agent kill-sub` (`killSubAgent`)、`agent kill-jobs` (`killActiveJobs`)
-- [ ] `agent rollback` (`rollbackToSnapshot`、`rollbackAndSendMessage`、`editFirstMessageAndResend`)
-- [ ] `agent mode plan|act` (`togglePlanActMode` / `updateChatMode`)
-- [ ] `agent auto-approve` (`autoApprovalSettings`)
-- [ ] `agent resources` (`updateTaskResources`)、`agent tool-params` (`updateTaskToolParams`)、`agent engine` (`updateTaskEngine`)
-- [ ] `agent summary start/stop/save` (`summary_task_start` / `summary_task_stop` / `save_task_summary`)
-- [ ] `agent export` (`exportTaskWithId`)、`agent models refresh` (`refreshOpenAiModels`)
-- [ ] 其余 UI 语义命令（`selectImages`、`openImage`、`openSettings`、`openExtensionSettings`、`checkIsImageUrl`）按需暴露或显式标注不适用
-- [ ] `agent state` → `GET /ai/state`；`agent ping` → `GET /ai/ping`
-- [ ] `agent settings` → `POST /ai/settings`；`agent configuration` → `GET /ai/configuration`
-- [ ] `agent models` → `GET /ai/models`
-- [ ] `infini events [--task]` → `GET /ai/events` 原始事件流（调试用）
+- [x] `agent new` (`newTask`)、`agent reply` (`askResponse`)、`agent options` (`optionsResponse`)
+- [x] `agent reply --approve` / `--deny` (`askResponse` + `yesButtonClicked` / `noButtonClicked`)
+- [x] `agent resume` (`autoResumeTask`)、`agent load` (`showTaskWithId`)
+- [x] `agent cancel` (`cancelTask`)、`agent clear [--all]` (`clearTask`，`--all` 服务端展开成 per-task)
+- [x] `agent stop shell` (`stopShellSession`)、`agent stop tool` (`stopToolExecution`)
+- [x] `agent stop subagent` (`killSubAgent`)、`agent stop job` (`killActiveJobs`，同步执行)
+- [x] `agent snapshots` + `agent rollback [--message]` (`rollbackToSnapshot` / `rollbackAndSendMessage`)
+- [x] `agent edit-first` (`editFirstMessageAndResend`)
+- [x] `agent mode act|plan|graph|fast` (`updateChatMode`；`togglePlanActMode` 为旧别名，走 `agent send`)
+- [x] `agent auto-approve` (`autoApprovalSettings`，读-改-写)
+- [x] `agent resources` (`updateTaskResources`)、`agent tool-params` (`updateTaskToolParams`)、`agent engine` (`updateTaskEngine`)
+- [x] `agent settings [--task]` → `POST /ai/settings`（任务级模型切换在服务端命令化为 `updateSettings`）
+- [x] `agent browser takeover|resume|stop` (`browserTakeOver` / `browserResume` / `browserStop`)
+- [x] `agent send <type>` 逃生舱：对照「服务端真正处理的 24 种」做客户端校验
+- [x] `agent state [--task]` → `GET /ai/state`；`agent messages` 从同一 state 派生
+- [x] `agent ping` → `GET /ai/ping`；`agent config` → `GET /ai/configuration`；`agent models` → `GET /ai/models`
+- [x] `infini events [--task]` → `GET /ai/events` 原始事件流（调试用，P0 已实现）
+- [x] 本版服务端**不存在**的 type 显式标注不适用：`summary_task_start` / `summary_task_stop` /
+      `save_task_summary` / `exportTaskWithId` / `refreshOpenAiModels` / `selectImages` / `openImage` /
+      `openSettings` / `openExtensionSettings` / `checkIsImageUrl`
+
+#### agent 轨实现要点（`internal/agent`）
+
+- **`/api/ai/message` 的 body 根本没被校验**：控制器签名是 `@Body() message: WebviewMessage`，而
+  `WebviewMessage` 是 `import type` 来的纯 TS 类型，运行时已被擦除，Nest 的 `ValidationPipe` 拿不到
+  metatype 就整个跳过。所以 DTO 里那份 `WEBVIEW_MESSAGE_TYPES`（18 项）**只是 Swagger 文档**。
+  两个后果：① worker 处理但未列入枚举的 6 种（`autoResumeTask`、`showTaskWithId`、`updateSettings`、
+  三个 `browser*`）实际可用；② 完全不存在的 type 会被接受并入队，然后在 worker 的 `default` 分支只留
+  一行日志就丢掉，调用方看到的是 `{"queued": true}`——一个伪成功。因此 type 校验必须放在 CLI 侧，
+  且在建 client 之前。
+- **资源组的三态**：字段缺省 = 不动，`[]` = 清空，有值 = 替换。Cobra 的 `GetStringSlice` 对未设置的
+  flag 返回空切片，直接透传就会把资源清空，所以 `Command` 里的 `databaseIds/ragIds/projectIds` 用
+  `*[]string`，并按 `Changed()` 决定是否落字段。`engineId` 同理（空串 = 解绑）。
+- **回滚点没有列表接口**：服务端在每个已提交的用户回合建快照，并按精确 `snapshot_ts` 查，对不上就
+  `Snapshot <ts> not found`。所以 `agent snapshots` 从 `GET /ai/state` 的 `infiniMessages` 里筛
+  `say=task`（首条）与 `say=user_feedback`（后续用户回合）推导出来——不这么做，用户只能去 Web UI 抄
+  时间戳。
+- **`autoApprovalSettings` 是整体覆盖写**：服务端存的就是收到的那个对象，少传一个字段就等于把那项
+  能力关掉、把预算清零。所以 `agent auto-approve` 先读当前 state，再只覆盖用户传了的 flag；结构体
+  全字段用指针，保证没提到的字段序列化时直接不出现。`databaseReturnLimit` 服务端会按部署上限 clamp。
+- **create-only 模式**：`graph` / `fast` 只能在建任务时选。服务端确实拦，但拦在命令入队并被 worker
+  取走之后，表现为一次「跑死的 run」而不是参数错误，所以 CLI 先拦。
+- **`killSubAgent` 的 id 走 `text` 而不是 `taskId`**：`taskId` 用于路由到持有 lease 的 worker，而子
+  Agent 活在父任务的 worker 内存里，服务端会自己从子任务 id 推出父任务。含 `_graph_` 的会被拒（图
+  节点会话只读）。
+- **`clearTask` 不带 `taskId` 不是一条命令**：控制器按该用户所有活跃 lease 展开成 per-task 命令，返回
+  `commandIds` 数组而不是单命令信封——用户的任务可能散在多个 worker 上，单条命令只会被其中一个消费。
+- **`killActiveJobs` 是唯一同步执行的 type**：杀引擎 job 需要调用方自己的 access token，控制器直接
+  内联做掉，返回 `{success, notification}`。
 
 ### 4.5 `infini db` — 数据源
 
@@ -392,12 +426,14 @@ REST 运维轨与 Agent 创作轨**同期交付**。
 - [x] §4.7 project 全量
 - [x] §4.8 hub 全量（含 KPI 与审核流）
 
-### P3 — Agent 深度控制
+### P3 — Agent 深度控制 ✅
 
-- [ ] §4.4 全部 30 种命令类型
-- [ ] 审批/选项应答的交互式 TUI
-- [ ] 回滚三兄弟 + `state.ready(forceReplace)` 对账
-- [ ] 模型与子 Agent 模型切换的参数联动校验（`apiProvider`/`apiModelId` 必须成对，`subAgentModelInheritMain=false` 时子模型必填）
+- [x] §4.4 全部命令类型（**24 种**；原清单的 30 种含 10 个本版服务端不存在的 type，已核对并标注）
+- [x] 审批/选项应答：`reply --approve/--deny`、`options`，`--interactive` 下 `Converse` 循环应答
+- [x] 回滚三兄弟（`rollbackToSnapshot` / `rollbackAndSendMessage` / `editFirstMessageAndResend`）
+      + `agent snapshots` 从 state 推导回滚点；`state.ready(forceReplace)` 对账沿用 P1 的 `run` 循环
+- [x] 模型与子 Agent 模型切换的参数联动校验（`apiProvider`/`apiModelId` 必须成对，`subAgentModelInheritMain=false` 时子模型必填）
+- [x] 模型 API key 只走 `INFINI_MODEL_API_KEY`，不提供 flag
 
 ### P4 — 运维与治理
 

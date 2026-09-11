@@ -34,11 +34,14 @@ type Command struct {
 	ConnID          string        `json:"connId,omitempty"`
 	AskResponse     string        `json:"askResponse,omitempty"`
 	ChatSettings    *ChatSettings `json:"chatSettings,omitempty"`
-	DatabaseIDs     []string      `json:"databaseIds,omitempty"`
-	RagIDs          []string      `json:"ragIds,omitempty"`
-	ProjectIDs      []string      `json:"projectIds,omitempty"`
 	APIProvider     string        `json:"apiProvider,omitempty"`
 	APIModelID      string        `json:"apiModelId,omitempty"`
+
+	// The resource lists are pointers to slices because the server reads an
+	// absent field as "leave this alone" and an empty array as "clear it".
+	DatabaseIDs *[]string `json:"databaseIds,omitempty"`
+	RagIDs      *[]string `json:"ragIds,omitempty"`
+	ProjectIDs  *[]string `json:"projectIds,omitempty"`
 
 	// SubAgentInherit is a pointer because the server distinguishes "not
 	// updating the subagent model" from "explicitly set to false", and rejects
@@ -46,11 +49,38 @@ type Command struct {
 	SubAgentInherit     *bool  `json:"subAgentModelInheritMain,omitempty"`
 	SubAgentAPIProvider string `json:"subAgentApiProvider,omitempty"`
 	SubAgentAPIModelID  string `json:"subAgentApiModelId,omitempty"`
+
+	// SessionID addresses a shell session (stopShellSession) or a browser
+	// session (browserTakeOver / browserResume / browserStop).
+	SessionID       string `json:"sessionId,omitempty"`
+	ToolExecutionID string `json:"toolExecutionId,omitempty"`
+	// SnapshotTs is the ts of the user message to rewind to.
+	SnapshotTs int64 `json:"snapshotTs,omitempty"`
+	// EngineID is a pointer so that clearing the engine (empty string) is
+	// distinguishable from not touching it.
+	EngineID   *string      `json:"engineId,omitempty"`
+	ToolParams *[]ToolParam `json:"toolParams,omitempty"`
+
+	AutoApproval *AutoApprovalSettings `json:"autoApprovalSettings,omitempty"`
+
+	Summary string `json:"summary,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// ToolParam carries per-task YAML for one installed external tool.
+type ToolParam struct {
+	ToolID string `json:"tool_id"`
+	YAML   string `json:"yaml"`
 }
 
 type ChatSettings struct {
-	Mode string `json:"mode"`
+	Mode                   string `json:"mode,omitempty"`
+	ReasoningHistoryPolicy string `json:"reasoningHistoryPolicy,omitempty"`
+	ThemeMode              string `json:"themeMode,omitempty"`
 }
+
+// ReasoningHistoryPolicies decide how much reasoning is replayed to the model.
+var ReasoningHistoryPolicies = []string{"last-only", "keep-all"}
 
 // EnqueueResponse is what POST /api/ai/message returns. `queued` being true
 // means the command was accepted, not that it ran.

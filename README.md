@@ -14,7 +14,8 @@
 - **P2 任务** ✅ 列表/查看、状态、置顶、取消、删除、DAG、原生 SQL、KPI SQL、证据、消息、工作区文件与归档、分享
 - **P2 资源面** ✅ 数据源（CRUD、连接测试、schema、上传、绑定）、知识库（CRUD、文档存储、绑定）、项目（CRUD、成员、文件）
 - **P2 语义层** ✅ 记忆构建、表/列/Playbook/KPI/偏好 CRUD、草稿与审核流
-- 技能/工具/规则/模板、设置与运维等其余模块待做，期间可用 `infini-cli api` 直调
+- **P3 Agent 深度控制** ✅ 24 种命令类型全覆盖、审批/选项应答、回滚与改写首条、模式与资源/引擎/工具参数、能力开关、模型配置
+- 技能/工具/规则/模板、定时任务、引擎与运行时、license、网盘、浏览器待做，期间可用 `infini-cli api` 直调
 
 ## 环境要求
 
@@ -260,6 +261,74 @@ infini-cli hub review reject kpi d_3 --comment "口径与财务对不上"
 infini-cli hub review translate --to zh-CN --field table_description="Fact table of orders"
 ```
 
+## Agent
+
+`dash new` 这类命令是包了业务外壳的 Agent 调用；`agent` 是同一条通道的直接入口，Web UI 能让 Agent 做的事这里都能做。
+
+```bash
+infini-cli agent new "统计上季度各区域营收，输出一张表" --database db_1
+infini-cli agent new "跑通全流程" --interactive          # 在终端里逐轮回答
+infini-cli agent reply t_1 "用自然月口径"
+infini-cli agent reply t_1 --approve                     # 或 --deny
+infini-cli agent options t_1 '["华东","华南"]'
+infini-cli agent messages t_1 --table
+```
+
+默认**不交互**：Agent 一提问就停下并把问题报出来，退出码非零。这是给 CI 用的——没人在旁边时挂着等回答，比直接失败更糟。要在终端里对话就加 `--interactive`。
+
+### 停止与回滚
+
+```bash
+infini-cli agent cancel t_1                    # 停整个任务
+infini-cli agent stop shell t_1 local:t_1:ab   # 只停一个 shell 会话
+infini-cli agent stop job t_1 job_7            # 只停一个 SQL job
+infini-cli agent stop subagent t_1_sub_2       # 只停一个子 Agent
+infini-cli agent clear t_1                     # 释放运行时，对话仍留在库里
+```
+
+回滚要先知道能回到哪儿。服务端只在**已提交的用户回合**建快照并按精确时间戳查，所以 `snapshots` 先列出合法的 `--ts`：
+
+```bash
+infini-cli agent snapshots t_1 --table
+infini-cli agent rollback t_1 --ts 1700000000000
+infini-cli agent rollback t_1 --ts 1700000000000 --message "换个口径重来"
+infini-cli agent edit-first t_1 "改成按渠道拆，不按区域"
+```
+
+带 `--message` 会顺带从那一点继续跑，所以它像一次普通回合那样流式输出；不带就只回滚，新状态随 SSE 到达。两者都是破坏性的，默认需要确认。
+
+### 运行时配置
+
+```bash
+infini-cli agent mode plan --task t_1          # 不带 --task 则改账号默认
+infini-cli agent resources t_1 --database db_1 --database db_2
+infini-cli agent resources t_1 --rag ""        # 空值 = 清空该组
+infini-cli agent engine t_1 --engine eng_1     # 或 --clear
+infini-cli agent tool-params t_1 --tool tool_1=params.yaml
+```
+
+资源组有三态：**不传 = 不动，空值 = 清空，有值 = 替换**。`graph` 和 `fast` 只能在建任务时选，切不进已有任务，CLI 会在发命令前就拦住。
+
+### 能力开关与模型
+
+```bash
+infini-cli agent auto-approve --table                    # 不带 flag 就是查看
+infini-cli agent auto-approve --max-requests 500 --browser=false
+infini-cli agent settings --provider openai --model gpt-4o
+infini-cli agent settings --task t_1 --provider anthropic --model claude-sonnet-4
+infini-cli agent models --table
+```
+
+`auto-approve` 是读-改-写：服务端存的就是收到的那个对象，少传一个字段等于把那项能力关掉，所以 CLI 先读当前值再只覆盖你传的那几个。模型 API key 只从 `INFINI_MODEL_API_KEY` 读，不提供 flag。
+
+### 逃生舱
+
+```bash
+infini-cli agent send togglePlanActMode --task t_1 --field chatSettings='{"mode":"plan"}'
+```
+
+`send` 会校验 type。这一步不是多余的：`/api/ai/message` 的 body 在服务端根本没走校验（签名上的类型是 `import type` 来的，运行时已擦除），未知 type 会被接受、入队，然后在 worker 里只留一行日志就丢掉——调用方看到的是 `{"queued": true}`，一个伪成功。
+
 ## 项目
 
 项目把任务、看板和文件圈到一组人身上，成员角色决定谁能改什么。角色有 `viewer`、`editor`、`manager`。
@@ -399,13 +468,14 @@ infini-enterprise-cli/
 │   ├── rag.go                   # 知识库：CRUD、文档存储、绑定
 │   ├── project.go               # 项目：CRUD、成员、文件树
 │   ├── hub*.go                  # 语义层：记忆构建、五类实体、草稿与审核
+│   ├── agent*.go                # Agent 直控：会话、生命周期、回滚、运行时配置
 │   ├── api.go                   # 任意接口直调逃生舱
 │   ├── events.go                # SSE 事件流
 │   ├── helpers.go               # 参数解析、JSON 载荷读取
 │   ├── term.go                  # TTY 检测与无回显输入
 │   └── version.go
 └── internal/
-    ├── agent/                   # 异步命令状态机、SSE 流渲染、看板工具结果解析
+    ├── agent/                   # 异步命令状态机、命令目录、SSE 流渲染、看板工具结果解析
     ├── auth/                    # proxy 登录链（md5 口令、JWT、profile）
     ├── cliexit/                 # 退出码与修复提示
     ├── client/                  # HTTP 封装、信封解包、错误分类、SSE、流式上传下载

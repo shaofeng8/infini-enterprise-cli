@@ -24,14 +24,17 @@ const sseReadyTimeout = 15 * time.Second
 
 // Options configures one command run.
 type Options struct {
-	Text        string
-	TaskID      string
-	Mode        string
-	Model       string // provider/modelId
-	SubAgent    string // provider/modelId, or "inherit"
-	Databases   []string
-	Rags        []string
-	Projects    []string
+	Text      string
+	TaskID    string
+	Mode      string
+	Model     string // provider/modelId
+	SubAgent  string // provider/modelId, or "inherit"
+	Databases []string
+	Rags      []string
+	Projects  []string
+	// Engine switches the task's SQL engine on the way in; an empty string
+	// clears it, which is why it is a pointer.
+	Engine      *string
 	AskReply    string // set for askResponse commands
 	Interactive bool
 	Timeout     time.Duration
@@ -64,9 +67,7 @@ func (r *Runner) NewTask(opts Options) (*Result, error) {
 		}
 		command.ChatSettings = &ChatSettings{Mode: opts.Mode}
 	}
-	command.DatabaseIDs = opts.Databases
-	command.RagIDs = opts.Rags
-	command.ProjectIDs = opts.Projects
+	applyResources(&command, opts.Databases, opts.Rags, opts.Projects)
 	// The server accepts a client-supplied task id and echoes it back, which
 	// lets a caller pre-register the id it will poll later.
 	command.TaskID = opts.TaskID
@@ -91,15 +92,97 @@ func (r *Runner) Reply(opts Options) (*Result, error) {
 	}
 
 	command := Command{
-		Type:        "askResponse",
+		Type:        TypeAskResponse,
 		TaskID:      opts.TaskID,
 		Text:        opts.Text,
 		AskResponse: response,
+		EngineID:    opts.Engine,
 	}
 	if err := applyModel(&command, opts); err != nil {
 		return nil, err
 	}
+	// A reply can carry runtime changes that take effect before execution
+	// resumes, which saves a separate command and a second worker round trip.
+	applyResources(&command, opts.Databases, opts.Rags, opts.Projects)
+	if opts.Mode != "" {
+		if err := checkSwitchableMode(opts.Mode); err != nil {
+			return nil, err
+		}
+		command.ChatSettings = &ChatSettings{Mode: opts.Mode}
+	}
 	return r.run(command, opts)
+}
+
+// Options answers a multiple-choice question.
+func (r *Runner) Options(opts Options) (*Result, error) {
+	if opts.TaskID == "" {
+		return nil, cliexit.Usage("a task id is required to answer options")
+	}
+	if strings.TrimSpace(opts.Text) == "" {
+		return nil, cliexit.Usage("a selection is required")
+	}
+	return r.run(Command{
+		Type:   TypeOptionsResponse,
+		TaskID: opts.TaskID,
+		Text:   opts.Text,
+	}, opts)
+}
+
+// RollbackAndSend rewinds to a snapshot and resumes from there with a new
+// message, so the turn streams like any other.
+func (r *Runner) RollbackAndSend(opts Options, snapshotTs int64) (*Result, error) {
+	if opts.TaskID == "" {
+		return nil, cliexit.Usage("a task id is required to roll back")
+	}
+	if strings.TrimSpace(opts.Text) == "" {
+		return nil, cliexit.Usage("a message is required; use rollbackToSnapshot to only rewind")
+	}
+	return r.run(Command{
+		Type:       TypeRollbackAndSend,
+		TaskID:     opts.TaskID,
+		SnapshotTs: snapshotTs,
+		Text:       opts.Text,
+	}, opts)
+}
+
+// EditFirstAndResend replaces the opening prompt and re-runs the task.
+func (r *Runner) EditFirstAndResend(opts Options) (*Result, error) {
+	if opts.TaskID == "" {
+		return nil, cliexit.Usage("a task id is required")
+	}
+	if strings.TrimSpace(opts.Text) == "" {
+		return nil, cliexit.Usage("a replacement prompt is required")
+	}
+	return r.run(Command{
+		Type:   TypeEditFirstAndResend,
+		TaskID: opts.TaskID,
+		Text:   opts.Text,
+	}, opts)
+}
+
+// Resume restarts a task that stopped without finishing.
+func (r *Runner) Resume(opts Options) (*Result, error) {
+	if opts.TaskID == "" {
+		return nil, cliexit.Usage("a task id is required to resume")
+	}
+	return r.run(Command{Type: TypeAutoResumeTask, TaskID: opts.TaskID}, opts)
+}
+
+// checkSwitchableMode rejects the modes that only exist at creation time.
+// The server enforces this too, but only after the command has been queued and
+// picked up, so the failure would arrive as a dead run rather than a usage error.
+func checkSwitchableMode(mode string) error {
+	if !slices.Contains(ChatModes, mode) {
+		return cliexit.Usage("unsupported mode %q, expected one of: %s",
+			mode, strings.Join(ChatModes, ", "))
+	}
+	if slices.Contains(CreateOnlyChatModes, mode) {
+		return cliexit.Hint(
+			cliexit.Usage("%s mode can only be chosen when a task is created", mode),
+			"start a new task with --mode %s instead", mode,
+		)
+	}
+	return nil
 }
 
 // Cancel stops a running task. It is fire-and-forget: the command is queued and
@@ -110,6 +193,21 @@ func (r *Runner) Cancel(taskID string) error {
 	}
 	_, err := r.enqueue(Command{Type: "cancelTask", TaskID: taskID})
 	return err
+}
+
+// applyResources attaches only the resource groups that were actually given.
+// An empty array is meaningful to the server ("clear this group"), so an
+// unset flag must be left off the payload entirely.
+func applyResources(command *Command, databases, rags, projects []string) {
+	if databases != nil {
+		command.DatabaseIDs = &databases
+	}
+	if rags != nil {
+		command.RagIDs = &rags
+	}
+	if projects != nil {
+		command.ProjectIDs = &projects
+	}
 }
 
 // applyModel parses the provider/modelId flags. The server rejects a provider
@@ -148,14 +246,18 @@ func splitModel(value, flag string) (provider, modelID string, err error) {
 	return provider, strings.TrimSpace(modelID), nil
 }
 
-// enqueue posts a command without streaming, for fire-and-forget types.
-func (r *Runner) enqueue(command Command) (*EnqueueResponse, error) {
+// post sends a command and returns the raw body, which differs by type.
+func (r *Runner) post(command Command) (json.RawMessage, error) {
 	command.ProtocolVersion = 2
 	if command.ClientOpID == "" {
 		command.ClientOpID = uuid.New().String()
 	}
+	return r.c.Post("/api/ai/message", command)
+}
 
-	raw, err := r.c.Post("/api/ai/message", command)
+// enqueue posts a command without streaming, for fire-and-forget types.
+func (r *Runner) enqueue(command Command) (*EnqueueResponse, error) {
+	raw, err := r.post(command)
 	if err != nil {
 		return nil, err
 	}

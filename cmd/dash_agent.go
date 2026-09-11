@@ -28,25 +28,44 @@ func agentOptions(cmd *cobra.Command, renderer *agent.Renderer) agent.Options {
 	mode, _ := cmd.Flags().GetString("mode")
 	model, _ := cmd.Flags().GetString("model")
 	subAgent, _ := cmd.Flags().GetString("subagent-model")
-	databases, _ := cmd.Flags().GetStringSlice("database")
-	rags, _ := cmd.Flags().GetStringSlice("rag")
-	projects, _ := cmd.Flags().GetStringSlice("project")
 	interactive, _ := cmd.Flags().GetBool("interactive")
 	timeout, _ := cmd.Flags().GetDuration("wait-timeout")
 	keep, _ := cmd.Flags().GetBool("transcript")
 
-	return agent.Options{
+	opts := agent.Options{
 		Mode:         mode,
 		Model:        model,
 		SubAgent:     subAgent,
-		Databases:    databases,
-		Rags:         rags,
-		Projects:     projects,
+		Databases:    resourceFlag(cmd, "database"),
+		Rags:         resourceFlag(cmd, "rag"),
+		Projects:     resourceFlag(cmd, "project"),
 		Interactive:  interactive,
 		Timeout:      timeout,
 		Renderer:     renderer,
 		KeepMessages: keep,
 	}
+	if cmd.Flags().Changed("engine") {
+		engine, _ := cmd.Flags().GetString("engine")
+		opts.Engine = &engine
+	}
+	return opts
+}
+
+// resourceFlag distinguishes the three states the server cares about: absent
+// (leave the group alone), empty (clear it), and a list (replace it). Cobra
+// hands back an empty slice for an unset flag, which would read as "clear".
+func resourceFlag(cmd *cobra.Command, name string) []string {
+	if !cmd.Flags().Changed(name) {
+		return nil
+	}
+	values, _ := cmd.Flags().GetStringSlice(name)
+	ids := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			ids = append(ids, trimmed)
+		}
+	}
+	return ids
 }
 
 func addAgentFlags(cmd *cobra.Command) {
@@ -117,7 +136,7 @@ requirements before it starts building.`,
 		if err != nil {
 			return err
 		}
-		return reportAgentResult(result, "create")
+		return reportAgentResult(result, "dash", "create")
 	},
 }
 
@@ -173,7 +192,7 @@ agent: it is what makes concurrent edits safe.
 		if err != nil {
 			return err
 		}
-		return reportAgentResult(result, "update")
+		return reportAgentResult(result, "dash", "update")
 	},
 }
 
@@ -244,7 +263,7 @@ same for the agent, but a very large context will consume prompt budget.`,
 		if err != nil {
 			return err
 		}
-		return reportAgentResult(result, "")
+		return reportAgentResult(result, "dash", "")
 	},
 }
 
@@ -292,7 +311,7 @@ var dashReplyCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return reportAgentResult(result, "")
+		return reportAgentResult(result, "dash", "")
 	},
 }
 
@@ -319,10 +338,13 @@ var dashCancelCmd = &cobra.Command{
 
 // reportAgentResult prints the run result and picks the exit code.
 //
+// family is the command group the hints should point at ("dash" or "agent"),
+// so a stopped run tells you how to continue it from where you were.
+//
 // expectSubmit names the dashboard operation the command was supposed to
 // perform; when set, a run that never produced an accepted submit is a failure
 // even if the agent thinks it finished.
-func reportAgentResult(result *agent.Result, expectSubmit string) error {
+func reportAgentResult(result *agent.Result, family, expectSubmit string) error {
 	payload := map[string]any{
 		"taskId":     result.TaskID,
 		"stop":       result.Stop,
@@ -363,8 +385,8 @@ func reportAgentResult(result *agent.Result, expectSubmit string) error {
 	case agent.StopAsk:
 		return cliexit.Hint(
 			cliexit.New(cliexit.CodeBusiness, "the agent is waiting for an answer (%s)", askLabel(result.Ask)),
-			"answer with `%s dash reply %s \"...\"`, or rerun with --interactive",
-			config.AppName, result.TaskID,
+			"answer with `%s %s reply %s \"...\"`, or rerun with --interactive",
+			config.AppName, family, result.TaskID,
 		)
 	case agent.StopTimeout:
 		return cliexit.Hint(
@@ -375,8 +397,8 @@ func reportAgentResult(result *agent.Result, expectSubmit string) error {
 	case agent.StopInterrupted:
 		return cliexit.Hint(
 			cliexit.New(cliexit.CodeBusiness, "interrupted while task %s was running", result.TaskID),
-			"the task keeps running server-side; cancel it with `%s dash cancel %s`",
-			config.AppName, result.TaskID,
+			"the task keeps running server-side; cancel it with `%s %s cancel %s`",
+			config.AppName, family, result.TaskID,
 		)
 	case agent.StopFailed:
 		message := result.Error

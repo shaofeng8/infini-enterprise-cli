@@ -232,8 +232,14 @@ func TestNewTaskSendsProtocolAndIdempotencyKey(t *testing.T) {
 	if command.ChatSettings == nil || command.ChatSettings.Mode != "act" {
 		t.Fatalf("chatSettings: got %+v", command.ChatSettings)
 	}
-	if len(command.DatabaseIDs) != 1 || command.DatabaseIDs[0] != "db_1" {
+	if command.DatabaseIDs == nil || len(*command.DatabaseIDs) != 1 || (*command.DatabaseIDs)[0] != "db_1" {
 		t.Fatalf("databaseIds: got %#v", command.DatabaseIDs)
+	}
+	// An untouched resource group must be absent, not an empty array: the
+	// server reads an empty array as "clear this group".
+	if command.RagIDs != nil || command.ProjectIDs != nil {
+		t.Fatalf("unset resource groups should be omitted: rags %#v, projects %#v",
+			command.RagIDs, command.ProjectIDs)
 	}
 }
 
