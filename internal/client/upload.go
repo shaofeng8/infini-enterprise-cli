@@ -15,12 +15,20 @@ import (
 //
 // The body is streamed through a pipe rather than assembled in memory, because
 // data source and knowledge base uploads are routinely hundreds of megabytes.
+//
+// An empty filePath sends the fields alone, which some endpoints need: editing
+// a local skill or tool takes the same multipart form whether or not a new
+// archive comes with it.
 func (c *Client) Upload(path, fieldName, filePath string, fields map[string]string) (json.RawMessage, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, cliexit.Usage("cannot read %q: %v", filePath, err)
+	var file *os.File
+	if filePath != "" {
+		opened, err := os.Open(filePath)
+		if err != nil {
+			return nil, cliexit.Usage("cannot read %q: %v", filePath, err)
+		}
+		defer opened.Close()
+		file = opened
 	}
-	defer file.Close()
 
 	reader, writer := io.Pipe()
 	form := multipart.NewWriter(writer)
@@ -36,12 +44,14 @@ func (c *Client) Upload(path, fieldName, filePath string, fields map[string]stri
 				return
 			}
 		}
-		var part io.Writer
-		if part, writeErr = form.CreateFormFile(fieldName, filepath.Base(filePath)); writeErr != nil {
-			return
-		}
-		if _, writeErr = io.Copy(part, file); writeErr != nil {
-			return
+		if file != nil {
+			var part io.Writer
+			if part, writeErr = form.CreateFormFile(fieldName, filepath.Base(filePath)); writeErr != nil {
+				return
+			}
+			if _, writeErr = io.Copy(part, file); writeErr != nil {
+				return
+			}
 		}
 		writeErr = form.Close()
 	}()

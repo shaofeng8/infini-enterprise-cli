@@ -147,7 +147,14 @@ type envelope struct {
 
 // Do performs a request and unwraps the response envelope.
 func (c *Client) Do(method, path string, body any) (json.RawMessage, error) {
-	resp, raw, err := c.doRaw(method, path, body)
+	return c.DoWithHeaders(method, path, body, nil)
+}
+
+// DoWithHeaders is Do with extra request headers, for the few endpoints that
+// authenticate out of band — the worker drain probe reads its token from
+// x-internal-token rather than the usual bearer credentials.
+func (c *Client) DoWithHeaders(method, path string, body any, headers map[string]string) (json.RawMessage, error) {
+	resp, raw, err := c.doRaw(method, path, body, headers)
 	if err != nil {
 		return nil, err
 	}
@@ -175,10 +182,13 @@ func unwrap(raw []byte) (json.RawMessage, error) {
 	return env.Data, nil
 }
 
-func (c *Client) doRaw(method, path string, body any) (*http.Response, []byte, error) {
+func (c *Client) doRaw(method, path string, body any, headers map[string]string) (*http.Response, []byte, error) {
 	req, err := c.newRequest(method, path, body)
 	if err != nil {
 		return nil, nil, err
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -216,7 +226,7 @@ func (c *Client) Delete(path string, body any) (json.RawMessage, error) {
 // RawResponse exposes the untouched status code and body, for the `api` escape
 // hatch and for binary downloads.
 func (c *Client) RawResponse(method, path string, body any) (int, []byte, error) {
-	resp, raw, err := c.doRaw(method, path, body)
+	resp, raw, err := c.doRaw(method, path, body, nil)
 	if err != nil {
 		return 0, nil, err
 	}
