@@ -26,6 +26,8 @@ var globals struct {
 	timeout     time.Duration
 	verbose     bool
 	trace       bool
+	dryRun      bool
+	auditLog    string
 }
 
 var rootCmd = &cobra.Command{
@@ -71,6 +73,9 @@ func applyGlobals() {
 	client.Timeout = globals.timeout
 	client.Verbose = globals.verbose
 	client.Trace = globals.trace
+	client.DryRun = globals.dryRun
+	output.DryRun = globals.dryRun
+	client.AuditLog = globals.auditLog
 }
 
 // resolveFormat honors --table > --json > configured default > json.
@@ -102,6 +107,8 @@ func init() {
 	pf.DurationVar(&globals.timeout, "timeout", 100*time.Second, "HTTP request timeout")
 	pf.BoolVar(&globals.verbose, "verbose", false, "Print request summaries to stderr")
 	pf.BoolVar(&globals.trace, "trace", false, "Print full requests and responses to stderr (secrets redacted)")
+	pf.BoolVar(&globals.dryRun, "dry-run", false, "Describe writes instead of sending them; reads still happen")
+	pf.StringVar(&globals.auditLog, "audit-log", "", "Append one JSON line per request to this file")
 
 	rootCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		return cliexit.Wrap(cliexit.CodeUsage, err)

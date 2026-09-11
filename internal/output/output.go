@@ -21,11 +21,20 @@ const (
 // Envelope is the stable stdout contract: every command emits this shape in
 // JSON mode so callers can branch on `success` without parsing stderr.
 type Envelope struct {
-	Success bool   `json:"success"`
+	Success bool `json:"success"`
+	// DryRun marks output produced while writes were suppressed. Without it a
+	// dry run is indistinguishable from a real one: a suppressed create still
+	// decodes into the command's result type, so it prints a record with
+	// empty fields that reads like something that actually happened.
+	DryRun  bool   `json:"dryRun,omitempty"`
 	Data    any    `json:"data"`
 	Message string `json:"message"`
 	Hint    string `json:"hint,omitempty"`
 }
+
+// DryRun mirrors client.DryRun so the envelope can be marked without the
+// output package depending on the client.
+var DryRun bool
 
 var (
 	current           = FormatJSON
@@ -46,7 +55,7 @@ func Success(data any, headers []string, toRows func() [][]string) error {
 		Table(headers, toRows())
 		return nil
 	}
-	return JSON(Envelope{Success: true, Data: normalize(data)})
+	return JSON(Envelope{Success: true, DryRun: DryRun, Data: normalize(data)})
 }
 
 // Raw prints a payload without the envelope, for passthrough commands.

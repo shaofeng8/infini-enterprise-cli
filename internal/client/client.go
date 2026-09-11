@@ -154,9 +154,27 @@ func (c *Client) Do(method, path string, body any) (json.RawMessage, error) {
 // authenticate out of band — the worker drain probe reads its token from
 // x-internal-token rather than the usual bearer credentials.
 func (c *Client) DoWithHeaders(method, path string, body any, headers map[string]string) (json.RawMessage, error) {
+	if isWrite(method) {
+		if err := auditPreflight(); err != nil {
+			return nil, err
+		}
+	}
+	if DryRun && isWrite(method) {
+		if err := auditRecord(method, path, 0, nil); err != nil {
+			return nil, err
+		}
+		return dryRunResponse(method, path, body)
+	}
+
 	resp, raw, err := c.doRaw(method, path, body, headers)
 	if err != nil {
+		if auditErr := auditRecord(method, path, 0, err); auditErr != nil {
+			return nil, auditErr
+		}
 		return nil, err
+	}
+	if auditErr := auditRecord(method, path, resp.StatusCode, nil); auditErr != nil {
+		return nil, auditErr
 	}
 
 	if Trace {

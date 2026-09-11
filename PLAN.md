@@ -500,14 +500,27 @@ REST 运维轨与 Agent 创作轨**同期交付**。
 
 `task public evidence` 是这组的重点：分享出去的报告用消息时间戳引用证据，这个命令把引用还原成背后真实跑过的工具调用，读者可以核对一个数字而不是选择相信它。单次最多 100 条；报告用到了委派工作时要加 `--include-subagent`，因为子 agent 的证据在它自己的任务上。另外它是这组里唯一把 `audit` 放在 body 而不是 query string 的端点。
 
-### P5 — 交付与分发
+### P5 — 交付与分发 ✅
 
-- [ ] `infini skill` — 输出 AI Agent 规范说明（对标 `agent_infini skill`，但面向企业命令集）
-- [ ] 多平台交叉编译（linux/darwin/windows × amd64/arm64）
-- [ ] 版本清单 + `--update` 自更新（**独立分发通道，不复用 `plugins/infini_cli`**）
-- [ ] README + 命令参考文档
-- [ ] 单测（命令解析、参数校验、输出格式）+ 针对本地 Infini 的 e2e 冒烟
-- [ ] 私有化交付物：离线包、审计日志、`--dry-run`
+- [x] `infini-cli spec`（别名 `skill-spec`）— 输出 AI Agent 规范说明
+- [x] 多平台交叉编译（linux/darwin/windows × amd64/arm64）
+- [x] 版本清单 + `infini-cli update` 自更新（**独立分发通道，不复用 `plugins/infini_cli`**）
+- [x] README + 命令参考文档
+- [x] 单测（命令解析、参数校验、输出格式）
+- [ ] 针对本地 Infini 的 e2e 冒烟（等环境，见下）
+- [x] 私有化交付物：`scripts/release` 离线通道、`--audit-log`、`--dry-run`
+
+`spec` 的实现要点：**命令清单是从 cobra 树里走出来的，不是手写的**。两百多条命令的手写清单撑不过一两个版本就会和二进制对不上，而一份说谎的规范比没有规范更糟。手写的是它周围的散文，因为 agent 会搞错的从来不是 flag 名字，而是那些约定：agent 的活儿是投递进队列而不是同步调用、省略资源列表和给空列表是两件事、密钥只走环境变量。
+
+自更新的实现要点：**通道地址一个字都不写死**。私有化部署往往在自己的内网镜像上分发，甚至根本没有出网路由，写死公网前缀错的时候比对的时候多。通道来自 `update-channel` 配置项、`INFINI_UPDATE_CHANNEL` 或 `--channel`，三者都没有时 `update` 直接报错并告诉你怎么设。通道根目录放一份 `latest.json`（`{version, releasedAt, notes, artifacts:[{os,arch,url,sha256,size}]}`），`sha256` 是必填的——没有校验和的产物不值得装，宁可拒绝也不盲信。artifact 的 `url` 允许相对通道，所以做镜像只要把目录树拷过去，不用改清单里的任何东西。
+
+替换自身用的是「先改名、再落位」：Windows 上正在运行的可执行文件不能被覆盖，但可以被改名，而且留着旧的意味着中途失败时还有一个能用的二进制可以退回去，而不是什么都不剩。装完会顺手删 `.old`，Windows 上旧映像还映射着时删不掉，那就留到下次更新再清。
+
+`scripts/release` 是一个 Go 程序而不是 Makefile target：这边从 Windows 上切版本和从 CI 上切一样多，而 Go 工具链是两边都已经有的那个依赖。`go run ./scripts/release --version 1.4.0` 会编出六个平台并把 `latest.json` 写在旁边，产出目录本身就是一个可以直接拿去挂 web 服务的通道。
+
+`--dry-run` 的实现要点：**只拦写，不拦读**。CLI 在写之前大多要先读一遍当前状态好把写做成 patch，一个查不了任何东西的 dry run 是没用的；被拦下的正好就是那些会改变什么的请求。被拦下的写会回一段自述（`{dryRun, method, path, body}`，走和 `--trace` 同一套脱敏），同时输出信封上多一个 `"dryRun": true`——否则被拦下的 create 仍然会解进命令的结果类型，打出一条字段全空的记录，看着像真发生过。
+
+`--audit-log` 的实现要点：**审计写不下去就不发请求**。日志在写操作发出**之前**先探一次可写性，事后再记结果。反过来做的话，日志一旦写不了，就会静悄悄漏掉已经发生的请求，而一份有洞的审计比没有审计更糟，因为它看上去是完整的。
 
 ---
 
@@ -531,7 +544,9 @@ REST 运维轨与 Agent 创作轨**同期交付**。
 3. `dash new` 默认非交互（`--brief` 一次建完），`--interactive` 为可选引导模式
 4. MCP server 模式（`infini mcp serve`）延后到 P5 之后再评估，当前不纳入范围
 
-仍待定（不阻塞 P0 开工）：
+5. 自更新通道不写死任何地址：base URL 作为配置项 `update-channel`，可被 `INFINI_UPDATE_CHANNEL` 与 `--channel` 覆盖，未配置时 `update` 报错并提示怎么设。理由是私有化部署基本都用客户自己的内网镜像，写死公网前缀反而没用；顺带也就不存在和 `agent_infini` 的 `plugins/infini_cli` 混用的可能
+6. 版本清单用通道根目录下的 `latest.json`：`{version, releasedAt, notes, artifacts:[{os,arch,url,sha256,size}]}`，`update` 校验 sha256 后原子替换自身
 
-5. 自更新通道的 OSS 前缀（不能与 `agent_infini` 的 `plugins/infini_cli` 混用）
-6. 是否把 `infini` 与 `agent_infini` 共享的 HTTP/SSE 抽成独立 Go SDK 包（先各自维护，P5 评估）
+仍待定：
+
+7. 是否把 `infini-cli` 与 `agent_infini` 共享的 HTTP/SSE 抽成独立 Go SDK 包。P5 评估结论：**暂不抽**。两边的认证模型（企业侧多租户 + proxy 超管令牌 vs 消费侧单账号）和错误映射已经分叉得足够远，抽出来的公共部分只剩一个薄薄的 `http.Do` 包装，换来的是一个要同步升级的跨仓依赖。继续各自维护，等两边真的出现第三个消费者时再议

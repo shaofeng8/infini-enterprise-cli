@@ -40,6 +40,7 @@ const (
 	KeyUsername       = "username"
 	KeyPreferLanguage = "prefer-language"
 	KeyDefaultOutput  = "default-output"
+	KeyUpdateChannel  = "update-channel"
 )
 
 // Keys is the full set of persistable settings, in display order.
@@ -54,6 +55,7 @@ var Keys = []string{
 	KeyUsername,
 	KeyPreferLanguage,
 	KeyDefaultOutput,
+	KeyUpdateChannel,
 }
 
 // SecretKeys are masked unless the caller explicitly asks for plaintext.
@@ -75,6 +77,7 @@ var envNames = map[string]string{
 	KeyTenantCode:     "INFINI_TENANT_CODE",
 	KeyPreferLanguage: "INFINI_PREFER_LANGUAGE",
 	KeyDefaultOutput:  "INFINI_DEFAULT_OUTPUT",
+	KeyUpdateChannel:  "INFINI_UPDATE_CHANNEL",
 }
 
 // SupportedLanguages mirrors the server's i18n directories.
@@ -325,6 +328,11 @@ func Server() string         { return strings.TrimRight(Get(KeyServer), "/") }
 func Console() string        { return strings.TrimRight(Get(KeyConsole), "/") }
 func PreferLanguage() string { return Get(KeyPreferLanguage) }
 func DefaultOutput() string  { return Get(KeyDefaultOutput) }
+
+// UpdateChannel is the base URL self-update reads its manifest from. There is
+// no default on purpose: a private deployment mirrors releases on its own
+// network, and a baked-in public URL would be wrong more often than right.
+func UpdateChannel() string { return strings.TrimRight(Get(KeyUpdateChannel), "/") }
 
 // Mask keeps enough of a secret visible to tell two credentials apart.
 func Mask(secret string) string {

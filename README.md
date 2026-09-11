@@ -18,7 +18,9 @@
 - **P4 扩展面** ✅ 技能、工具、规则、模板
 - **P4 运维面** ✅ 定时任务、引擎与运行时、license、文件与分片续传、浏览器自动化
 - **P4 分享与审计** ✅ 公开只读与超管审计读、证据回溯
-- 交付与分发（交叉编译、自更新、AI Agent 规范输出）待做；未包装的接口随时可用 `infini-cli api` 直调
+- **P5 交付与分发** ✅ AI Agent 规范输出、六平台交叉编译、自更新通道、`--dry-run` 与审计日志
+
+未包装的接口随时可用 `infini-cli api` 直调。
 
 ## 环境要求
 
@@ -32,6 +34,13 @@ make build          # 产物在 build/infini-cli
 make cross          # 交叉编译 linux/darwin/windows × amd64/arm64
 make test           # 单元测试
 make lint           # go vet
+```
+
+没有 make 也行（Windows 上通常如此）：
+
+```powershell
+go build -o build/infini-cli.exe .
+go test ./...
 ```
 
 ## 快速开始
@@ -536,6 +545,7 @@ infini-cli --profile staging api GET /api/ai/dashboards   # 单次切换，不�
 | `user-id` / `username` | 当前用户，登录后自动写入 |
 | `prefer-language` | 请求头 `x-lang`，取值 `en` `zh_CN` `ar` `ja` `ko` `ru` |
 | `default-output` | 默认输出格式，`json` 或 `table` |
+| `update-channel` | 自更新通道 base URL，没有默认值（见「自更新」） |
 
 ## 认证说明
 
@@ -603,6 +613,59 @@ infini-cli --trace   api GET /api/ai/dashboards   # 打印完整请求与响应
 
 `--trace` 会自动脱敏 `password`、`token`、`api-key` 等字段。
 
+## 演练与审计
+
+```bash
+infini-cli template create demo --text hello --dry-run     # 写操作只描述不发送
+infini-cli --audit-log /var/log/infini-cli.jsonl dash rm d1
+```
+
+`--dry-run` 只拦写，不拦读。CLI 在写之前大多要先读一遍当前状态好把写做成 patch，查不了东西的演练没有意义；被拦下的正好是那些会改变什么的请求。被拦下的写会回一段自述，同时输出信封上多一个 `"dryRun": true`——不然被拦下的 create 仍会解进命令的结果类型，打出一条字段全空的记录，看着像真发生过。
+
+`--audit-log` 每个请求追加一行 JSON（`{ts, method, path, status}`，被拦下的写另带 `dryRun`），文件权限 `0600`。日志在写操作发出**之前**先探一次可写性：写不进去就不发请求，因为有洞的审计比没有审计更糟，它看上去是完整的。
+
+## 自更新
+
+通道地址一个字都不写死。私有化部署往往在自己的内网镜像上分发，甚至没有出网路由，写死公网前缀错的时候比对的时候多：
+
+```bash
+infini-cli config set update-channel https://releases.example.com/infini-cli
+infini-cli update --check     # 只看有没有新版本
+infini-cli update             # 下载、校验 sha256、替换自身
+```
+
+也可以用 `INFINI_UPDATE_CHANNEL` 或 `--channel` 临时指定，三者都没有时 `update` 会报错并告诉你怎么设。
+
+切一个通道出来：
+
+```bash
+go run ./scripts/release --version 1.4.0 --notes "..."
+```
+
+它会编出六个平台并在旁边写一份 `latest.json`，产出目录本身就是通道，挂到任意静态服务上即可。清单里的 `url` 相对通道，所以做镜像只要把目录树拷过去。`sha256` 是必填的，没有校验和的产物会被拒绝而不是盲信。
+
+```json
+{
+  "version": "1.4.0",
+  "releasedAt": "2026-09-11T10:16:56Z",
+  "notes": "...",
+  "artifacts": [
+    { "os": "linux", "arch": "amd64", "url": "1.4.0/linux-amd64/infini-cli",
+      "sha256": "c78f96e0...", "size": 9683106 }
+  ]
+}
+```
+
+替换自身是「先改名、再落位」：正在运行的可执行文件在 Windows 上不能被覆盖但可以被改名，留着旧的意味着中途失败时还能退回去。装完顺手删 `.old`，Windows 上旧映像还映射着时删不掉，留到下次更新再清。
+
+## 给 AI Agent 用
+
+```bash
+infini-cli spec > infini-cli.md
+```
+
+输出一份完整规范：输出协议、退出码、命令清单与 flag，以及那些 agent 真正会搞错的约定——agent 的活儿是投递进队列而不是同步调用、省略资源列表和给空列表是两件事、密钥只走环境变量。命令清单是从 cobra 树里走出来的而不是手写的，所以不会和二进制对不上。
+
 ## 项目结构
 
 ```
@@ -628,6 +691,8 @@ infini-enterprise-cli/
 │   ├── browser.go               # 浏览器扩展自动化
 │   ├── api.go                   # 任意接口直调逃生舱
 │   ├── events.go                # SSE 事件流
+│   ├── spec.go                  # AI Agent 规范输出，命令清单从 cobra 树生成
+│   ├── update.go                # 自更新
 │   ├── helpers.go               # 参数解析、JSON 载荷读取
 │   ├── term.go                  # TTY 检测与无回显输入
 │   └── version.go
@@ -635,7 +700,7 @@ infini-enterprise-cli/
     ├── agent/                   # 异步命令状态机、命令目录、SSE 流渲染、看板工具结果解析
     ├── auth/                    # proxy 登录链（md5 口令、JWT、profile）
     ├── cliexit/                 # 退出码与修复提示
-    ├── client/                  # HTTP 封装、信封解包、错误分类、SSE、流式上传下载
+    ├── client/                  # HTTP 封装、信封解包、错误分类、SSE、流式上传下载、演练与审计
     ├── config/                  # 多 profile 配置与优先级解析
     ├── dashboard/               # 看板 REST 封装、spec 模型、filter 类型转换
     ├── task/                    # 任务 REST 封装、文件树、流式下载
@@ -647,5 +712,8 @@ infini-enterprise-cli/
     ├── ops/                     # 定时任务、引擎、运行时舰队、license
     ├── storage/                 # 文件目录、对象存储、分片续传会话
     ├── browser/                 # 浏览器动作分发与拒绝识别
+    ├── selfupdate/              # 通道清单、校验和、原子替换自身
     └── output/                  # JSON / 表格输出
 ```
+
+`scripts/release` 是一个独立的小程序：交叉编译六个平台并写出 `latest.json`，产出目录就是一个可以直接挂出去的更新通道。

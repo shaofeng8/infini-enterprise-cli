@@ -5,11 +5,26 @@ import (
 	"testing"
 )
 
+// isolateEnv clears every setting's environment variable.
+//
+// An operator of this CLI plausibly has INFINI_SERVER or INFINI_API_KEY
+// exported in the shell they run the tests from, and env beats the profile by
+// design, so without this the suite fails on their machine and nowhere else.
+func isolateEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range Keys {
+		if name := envNames[key]; name != "" {
+			t.Setenv(name, "")
+		}
+	}
+	t.Setenv("INFINI_PROFILE", "")
+}
+
 // useTempConfig points the package at an isolated config file.
 func useTempConfig(t *testing.T) {
 	t.Helper()
+	isolateEnv(t)
 	t.Setenv("INFINI_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
-	t.Setenv("INFINI_PROFILE", "")
 	if err := Init(""); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -93,9 +108,9 @@ func TestUseProfileSwitchesAndPersists(t *testing.T) {
 // A config file written by agent_infini uses a flat `global` block; it must stay
 // readable so operators can migrate without hand-editing YAML.
 func TestLegacyGlobalBlockMigrates(t *testing.T) {
+	isolateEnv(t)
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("INFINI_CONFIG", path)
-	t.Setenv("INFINI_PROFILE", "")
 
 	legacy := "global:\n  server: https://legacy.example.com\n  api-key: sk-legacy\n"
 	if err := writeFile(path, legacy); err != nil {

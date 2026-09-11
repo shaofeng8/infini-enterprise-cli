@@ -12,7 +12,7 @@ LDFLAGS := -s -w \
 
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
-.PHONY: all build run install test lint clean cross help
+.PHONY: all build run install test lint clean cross release help
 
 all: clean build
 
@@ -53,6 +53,12 @@ cross: clean
 			-o $(BUILD_DIR)/$(OS)-$(ARCH)/$(APP_NAME)$(EXT) . ; \
 	)
 
+# Builds every platform and writes latest.json alongside them, so $(BUILD_DIR)
+# can be served as an update channel as-is. Runs anywhere the Go toolchain
+# does, including Windows without make: go run ./scripts/release --version X
+release:
+	@go run ./scripts/release --version $(VERSION) --notes "$(NOTES)"
+
 help:
 	@echo "Usage:"
 	@echo "  make build    - Build for the current platform"
@@ -61,4 +67,5 @@ help:
 	@echo "  make test     - Run tests"
 	@echo "  make lint     - Run go vet"
 	@echo "  make cross    - Cross-compile for linux/darwin/windows on amd64/arm64"
+	@echo "  make release  - Cross-compile and write an update channel (latest.json)"
 	@echo "  make clean    - Remove build artifacts"

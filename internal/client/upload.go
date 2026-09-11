@@ -19,6 +19,16 @@ import (
 // assembled result. Length matters as well: without it the request goes out
 // chunked and the server has no size to check against.
 func (c *Client) Stream(method, path string, body io.Reader, length int64) (json.RawMessage, error) {
+	if err := auditPreflight(); err != nil {
+		return nil, err
+	}
+	if DryRun {
+		if err := auditRecord(method, path, 0, nil); err != nil {
+			return nil, err
+		}
+		return dryRunResponse(method, path, map[string]any{"bytes": length})
+	}
+
 	req, err := http.NewRequest(method, c.baseURL+path, body)
 	if err != nil {
 		return nil, cliexit.New(cliexit.CodeUsage, "cannot build request: %v", err)
@@ -33,9 +43,15 @@ func (c *Client) Stream(method, path string, body io.Reader, length int64) (json
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		if auditErr := auditRecord(method, path, 0, err); auditErr != nil {
+			return nil, auditErr
+		}
 		return nil, transportError(method, c.baseURL+path, err)
 	}
 	defer resp.Body.Close()
+	if auditErr := auditRecord(method, path, resp.StatusCode, nil); auditErr != nil {
+		return nil, auditErr
+	}
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -56,6 +72,19 @@ func (c *Client) Stream(method, path string, body io.Reader, length int64) (json
 // a local skill or tool takes the same multipart form whether or not a new
 // archive comes with it.
 func (c *Client) Upload(path, fieldName, filePath string, fields map[string]string) (json.RawMessage, error) {
+	if err := auditPreflight(); err != nil {
+		return nil, err
+	}
+	if DryRun {
+		if err := auditRecord(http.MethodPost, path, 0, nil); err != nil {
+			return nil, err
+		}
+		return dryRunResponse(http.MethodPost, path, map[string]any{
+			"file":   filePath,
+			"fields": fields,
+		})
+	}
+
 	var file *os.File
 	if filePath != "" {
 		opened, err := os.Open(filePath)
@@ -101,9 +130,15 @@ func (c *Client) Upload(path, fieldName, filePath string, fields map[string]stri
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		if auditErr := auditRecord(http.MethodPost, path, 0, err); auditErr != nil {
+			return nil, auditErr
+		}
 		return nil, transportError(http.MethodPost, c.baseURL+path, err)
 	}
 	defer resp.Body.Close()
+	if auditErr := auditRecord(http.MethodPost, path, resp.StatusCode, nil); auditErr != nil {
+		return nil, auditErr
+	}
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
