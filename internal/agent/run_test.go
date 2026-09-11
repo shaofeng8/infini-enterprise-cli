@@ -102,8 +102,11 @@ func (f *fakeServer) runner() *Runner {
 
 // script pushes frames once the command has been posted, mimicking a Worker
 // that only starts after it picks the command off the queue.
+//
+// It runs on its own goroutine, so it reports problems with Errorf rather than
+// Fatal: Fatal only stops the goroutine it is called from, which would leave
+// the test hanging on the stream instead of failing.
 func (f *fakeServer) script(t *testing.T, frames ...string) Command {
-	t.Helper()
 	select {
 	case command := <-f.posted:
 		for _, frame := range frames {
@@ -112,7 +115,8 @@ func (f *fakeServer) script(t *testing.T, frames ...string) Command {
 		close(f.frames)
 		return command
 	case <-time.After(5 * time.Second):
-		t.Fatal("the command was never posted")
+		t.Errorf("the command was never posted")
+		close(f.frames)
 		return Command{}
 	}
 }
