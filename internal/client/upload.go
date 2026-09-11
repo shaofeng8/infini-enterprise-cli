@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -10,6 +11,41 @@ import (
 
 	"github.com/chaozwn/infini-enterprise-cli/internal/cliexit"
 )
+
+// Stream sends a reader as the whole request body, with no multipart wrapper.
+//
+// The chunked upload endpoint pipes the request straight to a file, so a
+// multipart envelope would be written into the chunk itself and corrupt the
+// assembled result. Length matters as well: without it the request goes out
+// chunked and the server has no size to check against.
+func (c *Client) Stream(method, path string, body io.Reader, length int64) (json.RawMessage, error) {
+	req, err := http.NewRequest(method, c.baseURL+path, body)
+	if err != nil {
+		return nil, cliexit.New(cliexit.CodeUsage, "cannot build request: %v", err)
+	}
+	c.applyHeaders(req)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.ContentLength = length
+
+	if Verbose || Trace {
+		fmt.Fprintf(os.Stderr, "> %s %s%s (%d bytes)\n", method, c.baseURL, path, length)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, transportError(method, c.baseURL+path, err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, transportError(method, c.baseURL+path, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, httpStatusError(method, path, resp.StatusCode, raw)
+	}
+	return unwrap(raw)
+}
 
 // Upload posts a file as multipart/form-data.
 //

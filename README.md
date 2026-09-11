@@ -15,7 +15,10 @@
 - **P2 资源面** ✅ 数据源（CRUD、连接测试、schema、上传、绑定）、知识库（CRUD、文档存储、绑定）、项目（CRUD、成员、文件）
 - **P2 语义层** ✅ 记忆构建、表/列/Playbook/KPI/偏好 CRUD、草稿与审核流
 - **P3 Agent 深度控制** ✅ 24 种命令类型全覆盖、审批/选项应答、回滚与改写首条、模式与资源/引擎/工具参数、能力开关、模型配置
-- 技能/工具/规则/模板、定时任务、引擎与运行时、license、网盘、浏览器待做，期间可用 `infini-cli api` 直调
+- **P4 扩展面** ✅ 技能、工具、规则、模板
+- **P4 运维面** ✅ 定时任务、引擎与运行时、license、文件与分片续传、浏览器自动化
+- **P4 分享与审计** ✅ 公开只读与超管审计读、证据回溯
+- 交付与分发（交叉编译、自更新、AI Agent 规范输出）待做；未包装的接口随时可用 `infini-cli api` 直调
 
 ## 环境要求
 
@@ -343,6 +346,153 @@ infini-cli project file get proj_1 data/result.csv --out ./downloads/
 infini-cli project mkdir proj_1 data/raw
 ```
 
+## 扩展 Agent 的能力
+
+四样东西决定 agent 能做什么：**技能**（一份 SKILL.md 加配套文件，告诉它怎么做某件事）、**工具**（可调用的外部命令）、**规则**（每次都前置的常驻指令）、**模板**（存起来的提示词）。
+
+技能和工具都有两个来源：发布到 proxy 的 catalog（`install` 装）和你自己上传的压缩包（`upload` 传）。两者的 id 不通用——`uninstall` 收 catalog id，`rm` 收本地安装行的 id。
+
+```bash
+infini-cli skill available --table            # 当前可达的技能
+infini-cli skill available --task t_1 --table  # agent 在这个任务里实际能看到的
+infini-cli skill install <skillId> my-skill
+infini-cli skill upload ./my-skill.zip
+infini-cli skill toggle <skillId> inactive
+
+infini-cli tool ls --source local --table
+infini-cli tool install <pluginId> --name 数据分析 --alias data-analysis --author admin
+infini-cli tool state <pluginId>
+```
+
+`skill available` 是随上下文变的：服务端按任务挂载的数据源类型和浏览器是否开启过滤 catalog，所以同一账号对不同任务看到的列表不同。
+
+规则的作用域要么全局，要么绑定到具体数据源，这样「某个仓库的口径」不会跟着 agent 到处跑。想知道当前真正生效的是哪些，看 `rule enabled`——那是 agent 自己收到的那一份。
+
+```bash
+infini-cli rule add "时间范围" --value "查询必须带时间范围限制"
+infini-cli rule add "chinook 口径" --value @rule.md --database db_1
+infini-cli rule enabled --table
+infini-cli rule toggle 1 2 3 --off
+
+infini-cli template create "月度复盘" --text @monthly.md
+infini-cli template ls --table
+```
+
+模板只是存储，没有任何命令会展开或执行它；要用就读出文本交给 `agent new`。
+
+## 定时任务
+
+定时任务按 cron 触发一段提示词，产出的就是普通任务，所以 `task` 和 `agent` 下所有命令对结果都适用。
+
+```bash
+infini-cli schedule create "每日销售简报" \
+    --prompt "汇总昨日销售数据并生成简报" \
+    --cron "0 30 9 * * ?" \
+    --database db_sales
+
+infini-cli schedule ls --table
+infini-cli schedule runs s_1 --table
+infini-cli schedule run s_1          # 立刻跑一次，不影响 cron
+infini-cli schedule pause s_1
+```
+
+两件容易踩的事。cron 是**六段 Quartz**（秒 分 时 日 月 周），`"0 30 9 * * ?"` 是每天 09:30；五段的 Unix 写法会被当场拦下。另外，运行配置在保存时就冻结了，不是触发时解析的——夜间报表会一直用当初设定的模型和数据源，账号默认值变了也不跟随。这是刻意的，代价是改默认值不会更新已有计划，得 `schedule update`。
+
+`schedule runs` 里每条记录都带它产出的 `taskId`，失败的报表可以直接追进那段对话。标了 misfire 的是重启后补发，而非按时触发的。
+
+## 运维
+
+「引擎」是两个不同的东西。`engine status/start/stop` 管的是本部署内嵌的那个进程，全员共用——所以 `engine stop` 会打断这台机器上所有人的查询。`engine available` 列的是你的账号可以绑定的引擎，那才是 `agent engine` 和 `schedule --engine` 收的 id。
+
+```bash
+infini-cli engine check                 # 运行中退出 0，未运行退出 3
+infini-cli engine ensure                # 脚本里用这个，start 不幂等
+infini-cli engine logs --limit 200
+infini-cli engine available --table
+```
+
+任务不在 API 进程里跑：worker 领走一个任务（lease）、执行、续租；worker 挂了 lease 过期，另一个接手。所以任务一直排队而 API 日志干干净净是正常现象，第一站看 `runtime execution`：
+
+```bash
+infini-cli runtime instances --table
+infini-cli runtime execution t_1
+infini-cli runtime autoscaling
+INFINI_INTERNAL_TOKEN=... infini-cli runtime drain
+```
+
+`instances` 里 `REPORTED` 是实例自己上报的状态，`EFFECTIVE` 是注册表的结论——心跳断了就是 offline，不管它自称什么。drain 打到哪个 worker 取决于请求落到哪个实例，要指定就把 `--server` 指向具体实例。
+
+授权这边，synapse 自己不做判定，只透传 proxy 的结论，所以这里失败通常意味着 proxy 不可达而不是 license 无效：
+
+```bash
+infini-cli license status     # 不需要登录
+infini-cli license limits     # 需要登录，配额按账号算
+```
+
+## 文件
+
+```bash
+infini-cli fs ls --table
+infini-cli fs tree --search sales --files-only --table
+infini-cli fs put my-folder ./sales.csv
+infini-cli fs task-put t_1 ./raw.csv --subdir data
+infini-cli fs config          # 这个部署的大小上限
+```
+
+大文件走会话式分片，理由只有一个：能续传。
+
+```bash
+infini-cli fs session push ./dump.csv \
+    --target-type database --target-id db_1 --post-action import_database
+
+# 断了就接着传，只补服务端缺的那些分片
+infini-cli fs session push ./dump.csv --resume <uploadId>
+```
+
+会话还决定合并之后干什么——`store`、`extract_archive`、`build_rag`、`import_database`——所以「把几 GB 的 dump 导进数据源」走的是这条路，不只是搬文件。
+
+## 浏览器
+
+浏览器不在这套部署里，是一个通过 websocket 挂上来的 Chrome 扩展。所以这些命令是转发给你账号当前连着的那个浏览器，没连就什么也不发生。先确认：
+
+```bash
+infini-cli browser session
+infini-cli browser go https://example.com --session tab-1
+infini-cli browser view --session tab-1        # 带元素编号
+infini-cli browser click --index 4 --session tab-1
+infini-cli browser input "hello" --selector "input[name=q]" --enter
+infini-cli browser exec "document.title"
+```
+
+同一个 `--session` 就是同一个标签页；navigate 之后想 click 到同一页，两边得用同一个 id。
+
+要提醒一句：浏览器没连上时服务端回的是 HTTP 200 加 `success:false`，不是错误状态码。CLI 以 body 为准并映射成非零退出码，所以这里的退出码是可信的。
+
+想把运行中 agent 的浏览器交出去或收回来，用 `agent browser takeover/resume/stop`，不是这一组。
+
+## 分享与审计
+
+一套命令服务两类读者，而且不是一回事。
+
+不带 `--audit` 是公开读：完全不需要凭据，但只对所有者 `task share` 过的任务有效——就是分享链接看到的那个视图。带 `--audit` 是合规读：需要 proxy 超管令牌，能读任意任务（无论是否分享），并且每次读取都在服务端留下「谁读了什么」的记录。所以别把它当成绕过未分享任务的办法。
+
+```bash
+infini-cli task share t_1 --on
+infini-cli task public show t_1
+infini-cli task public files t_1 --table
+infini-cli task public zip t_1 --out ./audit/
+
+infini-cli task public show t_9 --audit          # 超管，留痕
+```
+
+这组的重点是 `task public evidence`。分享出去的报告用消息时间戳引用证据，这个命令把引用还原成背后真实跑过的工具调用——读者可以核对一个数字，而不是选择相信它：
+
+```bash
+infini-cli task public evidence t_1 1784807100587 1784807100999
+```
+
+单次最多 100 条。报告用到了委派工作时加 `--include-subagent`，因为子 agent 的证据在它自己的任务上。
+
 ## 配置
 
 配置文件默认在 `~/.infini-cli/config.yaml`，按 **profile** 组织，一个二进制可以在多个部署间切换：
@@ -469,6 +619,13 @@ infini-enterprise-cli/
 │   ├── project.go               # 项目：CRUD、成员、文件树
 │   ├── hub*.go                  # 语义层：记忆构建、五类实体、草稿与审核
 │   ├── agent*.go                # Agent 直控：会话、生命周期、回滚、运行时配置
+│   ├── skill.go tool.go         # 扩展面：技能与工具的 catalog 安装与本地上传
+│   ├── rule.go template.go      # 扩展面：常驻规则与提示词模板
+│   ├── schedule.go              # 定时任务：cron、冻结配置、运行历史
+│   ├── engine.go runtime.go     # 引擎进程与 worker 舰队、lease 排查、drain
+│   ├── license.go               # 授权状态与配额水位
+│   ├── fs.go fs_session.go      # 文件目录、对象存储、分片续传会话
+│   ├── browser.go               # 浏览器扩展自动化
 │   ├── api.go                   # 任意接口直调逃生舱
 │   ├── events.go                # SSE 事件流
 │   ├── helpers.go               # 参数解析、JSON 载荷读取
@@ -486,5 +643,9 @@ infini-enterprise-cli/
     ├── rag/                     # 知识库 REST 封装、文档存储描述
     ├── project/                 # 项目 REST 封装
     ├── hub/                     # 语义层 REST 封装、记忆构建任务、审核请求
+    ├── extension/               # 技能 / 工具 / 规则 / 模板
+    ├── ops/                     # 定时任务、引擎、运行时舰队、license
+    ├── storage/                 # 文件目录、对象存储、分片续传会话
+    ├── browser/                 # 浏览器动作分发与拒绝识别
     └── output/                  # JSON / 表格输出
 ```

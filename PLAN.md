@@ -332,53 +332,104 @@ Agent 轨实现要点（`internal/agent`）：
 
 ### 4.9 `infini skill` / `infini tool` / `infini rule` / `infini template`
 
-- [ ] `skill ls/available/install/uninstall/toggle/state/upload/edit/rm` → `/api/ai_skill/*` 9 个端点
-- [ ] `tool ls/local/installed/state/is-installed/install/uninstall/toggle/upload/edit/rm` → `/api/ai_tool/*` 11 个端点
-- [ ] `rule ls/add/update/rm/enable/show/enabled/all/databases` → `/api/ai_rule/*` 10 个端点
-- [ ] `template ls/show/create/update/rm` → `/api/ai_template/*` 5 个端点
+- [x] `skill available/ls/state/install/uninstall/toggle/upload/edit/rm` → `/api/ai_skill/*` 9 个端点
+- [x] `tool ls/local/installed/state/install/uninstall/toggle/upload/edit/rm` → `/api/ai_tool/*` 11 个端点（`state <pluginId>` 覆盖 `isInstalled/:pluginId`）
+- [x] `rule ls/enabled/all/show/databases/add/update/toggle/rm` → `/api/ai_rule/*` 10 个端点
+- [x] `template ls/show/create/update/rm` → `/api/ai_template/*` 5 个端点
+
+实现要点（`internal/extension`）：
+
+- **catalog 安装与本地上传是两套 id**：`uninstall` 收远端 catalog id，`rm`（`deleteLocal/:id`）收本地安装行 id。混用会得到 404 而不是有意义的报错，所以两个命令在帮助里互相指向。
+- **skill / tool 的分页参数是 `pageNum`/`pageSize`**，与其它模块的 `page`/`pageSize` 不同，已用 wire 测试钉住。
+- **`skill available` 是随上下文变化的**：服务端按任务已挂载的数据源类型 + 是否开浏览器过滤 catalog，所以同一账号对不同任务看到的列表不同。`--task` / `--browser` 就是这两个入参。
+- **`editLocal` 的 zip 是可选的**：同一个 multipart 表单既能带新包也能只改元数据，`client.Upload` 因此支持空 filePath（只发字段、不发 file part）。
+- **`tool install` 的展示元数据是必填**：服务端把 name/logo/alias/author 存进安装记录而不是回查 catalog。
+- **`rule` 的两个 id 类型不通**：`enabled` 收数字数组、`delete` 收字符串数组，CLI 在 `rule toggle` 里先校验数字，避免 422。
+- **`rule --database` 隐含 `rule_type=database`**：只有 database 类型会读 `databaseIds`，不一起设会静默无效。
+- **`rule update` / `template update` 的 DTO 继承 create**：name/text 恒为必填，所以两个命令都先读后写，让单个 flag 真的只改一处。
 
 ### 4.10 `infini schedule` — 定时任务
 
-`/api/ai_scheduler`：
+`/api/ai_scheduler`（**不是 `ai_schedule`**，控制器挂载名与模块名不一致）：
 
-- [ ] `schedule ls` / `show` / `runs` → `GET /`、`GET /:id`、`GET /:id/runs`
-- [ ] `schedule create` / `update` → `POST /`、`PUT /:id`
-- [ ] `schedule pause` / `resume` → `PATCH /:id/pause`、`PATCH /:id/resume`
-- [ ] `schedule run` → `POST /:id/run`
-- [ ] `schedule archive` → `DELETE /:id`
+- [x] `schedule ls` / `show` / `runs` → `GET /`、`GET /:id`、`GET /:id/runs`
+- [x] `schedule create` / `update` → `POST /`、`PUT /:id`
+- [x] `schedule pause` / `resume` → `PATCH /:id/pause`、`PATCH /:id/resume`
+- [x] `schedule run` → `POST /:id/run`
+- [x] `schedule archive` → `DELETE /:id`
+
+实现要点（`internal/ops/schedule.go`）：
+
+- **cron 是六段 Quartz**（秒 分 时 日 月 周），不是五段 Unix。五段会被服务端当字符串收下、之后才解析失败，所以 CLI 先数字段并给出 `"0 30 9 * * ?"` 的对照提示。
+- **`taskConfig` 在保存时冻结，不在触发时解析**：定时任务会一直用创建时的模型和数据源，账号默认值变了也不跟随。这是刻意的，代价是改默认值不会更新已有计划，只能 `schedule update`。
+- **`update` 与 `create` 共用 `SaveScheduleDto`**：title/prompt/cron/startAt 恒为必填，所以 `update` 先读后写、逐字段继承。
+- **`resume` 会因「cron 没有未来可执行时间」而失败**——服务端拒绝启用一个永不会触发的计划，不是 bug。
+- **`create` 的 `startAt` 默认取当前时刻**：任何其它默认值都会静默推迟首次执行。
+- **run 记录带 `taskId`**，可直接接 `task show` / `agent` 追踪；`isMisfire` 表示重启后补发，而非按时触发。
 
 ### 4.11 `infini engine` / `infini runtime` — 引擎与运行时
 
-- [ ] `engine status/check/start/stop/ensure/logs` → `/api/infinity-sql/*` 6 个端点
-- [ ] `engine available` / `engine enabled` → `/api/ai_byzer/available`、`/getEnabledInfiniSQLEngine`
-- [ ] `runtime instances` → `GET /api/runtime/instances`
-- [ ] `runtime execution <taskId>` → `GET /api/runtime/tasks/:taskId/execution`
-- [ ] `runtime ready` / `drain` / `autoscaling` → 对应端点（含 `POST /drain`）
+- [x] `engine status/check/start/stop/ensure/logs` → `/api/infinity-sql/*` 6 个端点
+- [x] `engine available` / `engine enabled` → `/api/ai_byzer/available`、`/getEnabledInfiniSQLEngine`
+- [x] `runtime instances` → `GET /api/runtime/instances`
+- [x] `runtime execution <taskId>` → `GET /api/runtime/tasks/:taskId/execution`
+- [x] `runtime ready` / `drain` / `autoscaling` → **`/api/internal/*`**（不是 `/api/runtime/*`，属于另一个控制器）
+
+实现要点（`internal/ops/engine.go`）：
+
+- **「引擎」是两个不同的东西**：`/api/infinity-sql/*` 管的是本部署内嵌的单个引擎进程（全员共用，所以 `engine stop` 会打断所有人的查询，默认二次确认）；`/api/ai_byzer/available` 列的是账号可绑定的引擎，是 `agent engine` 和 `schedule --engine` 收的那个 id。
+- **`runtime ready/drain/autoscaling` 在 `internal` 控制器下**，与 `runtime` 不同前缀。`drain` 的令牌走 `x-internal-token` 请求头，来源是 `INFINI_INTERNAL_TOKEN` 环境变量而非 flag；服务端只在配置了 `INTERNAL_HTTP_TOKEN` 时校验，所以未配置的部署会接受无鉴权 drain。
+- **drain 打到哪个 worker 取决于请求落到哪个实例**：负载均衡端点下基本等于随机，要指定 worker 必须把 `--server` 指向具体实例，帮助里明说了这点。
+- **`instances` 的 `status` 与 `effectiveStatus` 不是一回事**：心跳超时后 `effectiveStatus` 为 offline，而 `status` 仍是实例自己最后上报的值，表格两列都出。
+- **`runtime execution` 是排查「任务卡住」的第一站**：任务不在 API 进程里跑，是 worker 拿 lease 执行，所以 API 日志干净而任务不动是正常现象。
+- **`engine check` 用退出码表达结论**（运行中 0、未运行 3），可直接当 shell 卫语句。
 
 ### 4.12 `infini license` — 授权
 
-- [ ] `license status` → `GET /api/license/status`（公开，未登录可用）
-- [ ] `license refresh` → `POST /api/license/refresh`
-- [ ] `license limits` → `GET /api/license/limits`（需登录）
-- [ ] 全局：`newTask` 被限额拦截时输出可读提示与联系方式
+- [x] `license status` → `GET /api/license/status`（公开，未登录可用）
+- [x] `license refresh` → `POST /api/license/refresh`（同样公开）
+- [x] `license limits` → `GET /api/license/limits`（需登录）
+- [x] `agent new` 被限额拦截时，帮助与错误提示指向 `license limits`
+
+实现要点：**synapse 自己不做授权判定**，只是把 proxy 的结论透传，所以这里失败通常意味着 proxy 不可达而非 license 无效——帮助文本里写明了。`status` 公开是刻意的：过期部署的登录页也得能说出自己过期了；`limits` 需要登录是因为配额按账号算。
 
 ### 4.13 `infini fs` — 文件与网盘
 
-- [ ] `fs ls/tree/mkdir/rm` → `/api/directories`、`/api/fileTree`、`/api/createDirectory`、`/api/deleteDirectory`
-- [ ] `fs upload <dir> <file>` → `POST /api/upload/:directory`
-- [ ] `fs config` → `GET /api/uploadConfig`
-- [ ] `fs task-upload <taskId>` → `POST /api/taskUpload/:taskId`
-- [ ] `fs download <id>` → `GET /api/storage/download/:id`、`downloadTaskFile/:taskId`
-- [ ] `fs rm` → `POST /api/storage/delete`
-- [ ] `fs upload-large` → `/api/file_upload` 分片 5 步（init → status → chunks → complete → abort）
+- [x] `fs ls/tree/mkdir/rmdir` → `/api/directories`、`/api/fileTree`、`/api/createDirectory`、`/api/deleteDirectory`
+- [x] `fs put <dir> <file>` → `POST /api/upload/:directory`
+- [x] `fs config` → `GET /api/uploadConfig`
+- [x] `fs task-put <taskId> <file>` → `POST /api/taskUpload/:taskId`
+- [x] `fs get <id>` → `GET /api/storage/download/:id`（`downloadTaskFile/:taskId` 已在 P2 的 `task file get`）
+- [x] `fs rm` → `POST /api/storage/delete`
+- [x] `fs session push/init/status/chunk/complete/cancel` → `/api/file_upload` 分片 5 步
+
+实现要点（`internal/storage`）：
+
+- **上传控制器挂在 API 根上**（`@Controller('/')`），所以这些路径没有模块前缀，`deleteDirectory` 还是「DELETE 带 body」。
+- **分片是裸 body，不是 multipart**：服务端 `pipeline(req, writeStream)` 直接把请求体写进分片文件，套 multipart 会把边界写进分片、毁掉合并结果。为此给 client 加了 `Stream`，显式设 `ContentLength`（不设会走 chunked，服务端就没有尺寸可校验）。
+- **分片会话的价值就是续传**：`uploadedChunks` 是服务端持有分片的权威清单，`fs session push --resume <id>` 只补缺的那些。读文件用 `ReadAt` 而非流式，因为重试必须能重读已经过去的分片。
+- **会话还决定合并后干什么**：`postAction` 可以是 store / extract_archive / build_rag / import_database，所以「把 4 GB dump 导进数据源」走的是这条路，不只是搬文件。
+- **init 后文件不能变**：`SendFile` 先比对 size，不一致直接报参数错误，否则会合出一个损坏文件、到 complete 才暴露。
+- **任务上传走内容寻址仓库**：`--naming hash` 下相同内容幂等跳过，默认 original 同名覆盖。
 
 ### 4.14 `infini browser` — 浏览器自动化
 
 `/api/ai_browser`：
 
-- [ ] `browser sessions` / `session [uid]` → 3 个查询端点
-- [ ] `browser navigate/click/input/scroll/key/find/view/move` → `action/*` 8 个端点
-- [ ] `browser action --raw` → `POST /action` 通用入口
+- [x] `browser sessions` / `session [uid]` → 3 个查询端点
+- [x] `browser go/click/input/scroll/key/find/view/move` → 8 个动作
+- [x] `browser exec` / `browser console` → 只存在于通用入口的两个 console 动作
+- [x] `browser raw <type> [payload]` → `POST /action` 通用入口
+- [x] `browser direct <action> [payload]` → 保留对 `action/*` 8 个专用路由的可达性
+
+实现要点（`internal/browser`）：
+
+- **专用路由是诊断用的，通用入口才是超集**：`POST /action/navigate` 这一组把 sessionId 硬编码成 `'test-browser'`、不收 timeout，也到不了两个 console 动作。所以 CLI 所有命令都走 `POST /action`，`browser direct` 只为参数对等保留。
+- **浏览器没连上是 HTTP 200 + `success:false`**，不是错误状态码。必须读 body 才知道有没有发生事情，`readResult` 因此以 body 为准并映射成非零退出码，未连接时额外提示去看 `browser session`。
+- **未知 action 也是 200**（`Unknown action type: x`），所以 `CheckType` 在发请求前就拦掉。
+- **session id 即浏览器标签页**：同一个 id 的动作作用在同一页上，navigate 之后 click 想打到同一页必须同 `--session`。
+- **timeout 只能缩短**（100–60000ms），超出范围在本地报参数错误。
+- 与 `agent browser takeover/resume/stop` 的分工：那组是把运行中 agent 的浏览器交出去/收回来，这组是运维直接操作浏览器。
 
 ### 4.15 `infini api` — 逃生舱（保证 100% 覆盖）
 
@@ -420,7 +471,7 @@ REST 运维轨与 Agent 创作轨**同期交付**。
 
 ### P2 — 资源与数据面
 
-- [x] §4.3 task 全量（`public *` 一组挪到 P4）
+- [x] §4.3 task 全量（`public *` 一组挪到 P4，已完成）
 - [x] §4.5 db 全量
 - [x] §4.6 rag 全量
 - [x] §4.7 project 全量
@@ -435,14 +486,19 @@ REST 运维轨与 Agent 创作轨**同期交付**。
 - [x] 模型与子 Agent 模型切换的参数联动校验（`apiProvider`/`apiModelId` 必须成对，`subAgentModelInheritMain=false` 时子模型必填）
 - [x] 模型 API key 只走 `INFINI_MODEL_API_KEY`，不提供 flag
 
-### P4 — 运维与治理
+### P4 — 运维与治理 ✅
 
-- [ ] §4.9 skill / tool / rule / template
-- [ ] §4.10 schedule
-- [ ] §4.11 engine / runtime
-- [ ] §4.12 license
-- [ ] §4.13 fs（含分片上传）
-- [ ] §4.14 browser
+- [x] §4.9 skill / tool / rule / template（35 个端点）
+- [x] §4.10 schedule
+- [x] §4.11 engine / runtime
+- [x] §4.12 license
+- [x] §4.13 fs（含分片续传）
+- [x] §4.14 browser
+- [x] 从 P2 挪来的 `task public *` 分享与审计一组（7 个端点）
+
+`task public *` 的实现要点：**一套端点服务两类读者，而且不是一回事**。不带 `--audit` 是公开读，完全不需要凭据，但只对所有者 `task share` 过的任务有效——就是分享链接看到的那个视图。带 `--audit` 是合规读：需要 proxy 超管令牌，能读任意任务（无论是否分享），且每次读取都在服务端留下「谁读了什么」的日志。所以 audit 不是「带登录的公开读」，也不该被 CLI 在公开读被拒时自动启用，`--audit` 因此挂在每个子命令上而非命令组上，让它在使用点可见。
+
+`task public evidence` 是这组的重点：分享出去的报告用消息时间戳引用证据，这个命令把引用还原成背后真实跑过的工具调用，读者可以核对一个数字而不是选择相信它。单次最多 100 条；报告用到了委派工作时要加 `--include-subagent`，因为子 agent 的证据在它自己的任务上。另外它是这组里唯一把 `audit` 放在 body 而不是 query string 的端点。
 
 ### P5 — 交付与分发
 
