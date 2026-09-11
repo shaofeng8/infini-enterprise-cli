@@ -276,14 +276,25 @@ Agent 轨实现要点（`internal/agent`）：
 
 `/api/ai/context-hub`，端点最多的一组：
 
-- [ ] `hub memory start/batch/active/cancel/status/latest` → `memory-build/*` 6 个端点
-- [ ] `hub table ls/add/update/rm` + `hub table dbs` → `table-data/*`
-- [ ] `hub column ls/add/update/rm` → `table-column/*`
-- [ ] `hub playbook ls/add/update/rm` → `playbook/*`
-- [ ] `hub kpi ls/add/update/rm` → `kpi/*`
-- [ ] `hub pref ls/add/update/rm` → `preference/*`
-- [ ] `hub draft add/ls/table-updates` → `draft/*`
-- [ ] `hub review pending/approve/reject/restore/translate` → `review/*`
+- [x] `hub memory start/batch/active/cancel/status/latest` → `memory-build/*` 7 个端点（含 `cancel-active`）
+- [x] `hub table ls/add/update/rm` + `hub table dbs` → `table-data/*`
+- [x] `hub column ls/add/update/rm` → `table-column/*`
+- [x] `hub playbook ls/add/update/rm` → `playbook/*`
+- [x] `hub kpi ls/add/update/rm` → `kpi/*`
+- [x] `hub pref ls/add/update/rm` → `preference/*`
+- [x] `hub draft add/ls/table-updates` → `draft/*`
+- [x] `hub review pending/approve/reject/restore/translate` → `review/*`
+
+#### hub 轨实现要点（`internal/hub`）
+
+- **URL 段不是实体类型的机械变形**：`table_column_data` 的路由是 `table-column`、`user_preference` 是 `preference`。这是加新实体时最容易错的地方，`Kind.route()` 有测试逐条钉住。
+- **`hub memory start` 的选表由 CLI 从 schema 推导**：服务端 DTO 要求 `tables[].columns[]` 且都不能为空，但那是 UI 勾选的结果。CLI 改为读 `GET /ai_database/schema/:id`，默认全选，`--table name` / `--table name:col1,col2` 收窄；`--missing-only` 用服务端自己给的 `inContext` 判断覆盖情况，比再去 hub 列表里对账可靠。显式选表优先于 `--missing-only`。
+- **`taskId` 是构建工作区的名字**：服务端用它 `resolveStandaloneWorkspace(uid, taskId)`，格式无要求，所以 CLI 每次自己 mint 一个。
+- **同一数据源同时只有一个构建**：`createPersistentJob` 遇到已有活跃 job 会直接返回它，所以重复 start 不会起两个。
+- **批量和单个的选表位置不同**：`batch-start` 只收 `databaseIds`，选表在服务端做，所以批量命令不需要 schema 往返。
+- **hub 没有 get-by-id 路由**：`update` 需要整条记录做覆盖，只能用 `search`（服务端的模糊匹配包含 id 列）当作查单条，收敛在 `findHubEntity` 这个泛型里。
+- **审核可以只批准部分字段**：`approved_fields` 收窄范围，`field_values` 在写回前改值——这是「接受 AI 建议但要改一处」的正常路径，不是特例。空列表不能发：`approved_fields: []` 会被读成「什么都不批准」。
+- **草稿列表必须带 `entity_type`**：不同实体的 payload 形状不同，端点不混着返回。
 
 ### 4.9 `infini skill` / `infini tool` / `infini rule` / `infini template`
 
@@ -379,7 +390,7 @@ REST 运维轨与 Agent 创作轨**同期交付**。
 - [x] §4.5 db 全量
 - [x] §4.6 rag 全量
 - [x] §4.7 project 全量
-- [ ] §4.8 hub 全量（含 KPI 与审核流）
+- [x] §4.8 hub 全量（含 KPI 与审核流）
 
 ### P3 — Agent 深度控制
 

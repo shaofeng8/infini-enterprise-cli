@@ -13,7 +13,8 @@
 - **P1 看板 Agent 轨** ✅ 创建、编辑、提问、回答、取消
 - **P2 任务** ✅ 列表/查看、状态、置顶、取消、删除、DAG、原生 SQL、KPI SQL、证据、消息、工作区文件与归档、分享
 - **P2 资源面** ✅ 数据源（CRUD、连接测试、schema、上传、绑定）、知识库（CRUD、文档存储、绑定）、项目（CRUD、成员、文件）
-- 语义层（Context Hub）、技能/工具/规则、设置与运维等其余模块待做，期间可用 `infini-cli api` 直调
+- **P2 语义层** ✅ 记忆构建、表/列/Playbook/KPI/偏好 CRUD、草稿与审核流
+- 技能/工具/规则/模板、设置与运维等其余模块待做，期间可用 `infini-cli api` 直调
 
 ## 环境要求
 
@@ -216,6 +217,49 @@ infini-cli rag file get docs/q3.pdf --fs oss --access-key AKID --out ./downloads
 infini-cli rag file rm docs/stale.pdf --fs oss --access-key AKID   # 仅 oss/s3/cos 支持删除
 ```
 
+## 语义层
+
+Context Hub 是 Agent 写 SQL 之前读的东西：表和列的描述、分析 Playbook、KPI 定义、展示偏好。空的语义层只能靠猜，描述过的才能给出站得住的答案。
+
+填充它最快的方式是记忆构建——读 schema 和样本数据，生成描述候选交给审核：
+
+```bash
+infini-cli hub memory start chinook --wait          # 选表由 CLI 从 schema 推导，默认全选
+infini-cli hub memory start chinook --missing-only  # 只补语义层还没覆盖的表
+infini-cli hub memory start chinook --table "invoices:id,total,date"
+infini-cli hub memory batch db_1 db_2 --mode missing_only
+infini-cli hub memory active --table
+```
+
+构建跑在服务端，CLI 退出不影响它。同一个数据源同时只有一个构建，重复 start 返回的是已经在跑的那个。
+
+### 手工维护定义
+
+```bash
+infini-cli hub table ls --database db_1 --table
+infini-cli hub table add chinook invoices --description "订单事实表，一行一个订单行"
+infini-cli hub column add t_1 total --meaning "订单金额，含税，单位元"
+infini-cli hub playbook add "月度复盘" --database chinook --content @playbook.md
+infini-cli hub kpi add 月度销售额 --mode sql_playground --table chinook.invoices --sql @sales.sql
+infini-cli hub pref add "金额显示" --value "金额保留两位小数，单位万元" --table chinook.invoices
+```
+
+KPI 的 `--mode` 决定哪个字段承载定义：`business_logic` 用 `--logic` 写文字口径，`sql_playground` 用 `--sql` 放语句。SQL 口径存进去之前，可以先用 `task kpi-sql` 验证。
+
+### 审核
+
+改别人拥有的数据源不会直接生效，而是产生一条草稿，所以审核是正常编辑路径的一环，不是管理员的额外工作：
+
+```bash
+infini-cli hub review pending --table
+infini-cli hub draft ls table_data --status pending --table
+infini-cli hub review approve table_data d_1
+infini-cli hub review approve table_data d_1 --field table_description    # 只批准这一个字段
+infini-cli hub review approve kpi d_2 --set kpi_description="季度口径已修正"  # 边批准边改值
+infini-cli hub review reject kpi d_3 --comment "口径与财务对不上"
+infini-cli hub review translate --to zh-CN --field table_description="Fact table of orders"
+```
+
 ## 项目
 
 项目把任务、看板和文件圈到一组人身上，成员角色决定谁能改什么。角色有 `viewer`、`editor`、`manager`。
@@ -354,6 +398,7 @@ infini-enterprise-cli/
 │   ├── db.go                    # 数据源：CRUD、连接测试、schema、上传、绑定
 │   ├── rag.go                   # 知识库：CRUD、文档存储、绑定
 │   ├── project.go               # 项目：CRUD、成员、文件树
+│   ├── hub*.go                  # 语义层：记忆构建、五类实体、草稿与审核
 │   ├── api.go                   # 任意接口直调逃生舱
 │   ├── events.go                # SSE 事件流
 │   ├── helpers.go               # 参数解析、JSON 载荷读取
@@ -370,5 +415,6 @@ infini-enterprise-cli/
     ├── database/                # 数据源 REST 封装
     ├── rag/                     # 知识库 REST 封装、文档存储描述
     ├── project/                 # 项目 REST 封装
+    ├── hub/                     # 语义层 REST 封装、记忆构建任务、审核请求
     └── output/                  # JSON / 表格输出
 ```
