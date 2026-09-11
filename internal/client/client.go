@@ -113,13 +113,8 @@ func (c *Client) newRequest(method, path string, body any) (*http.Request, error
 	if err != nil {
 		return nil, cliexit.New(cliexit.CodeUsage, "cannot build request for %s %s: %v", method, path, err)
 	}
-	if c.token != "" {
-		req.Header.Set("Authorization", BearerToken(c.token))
-	}
+	c.applyHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
-	if c.lang != "" {
-		req.Header.Set("x-lang", c.lang)
-	}
 
 	if Verbose || Trace {
 		fmt.Fprintf(os.Stderr, "> %s %s%s\n", method, c.baseURL, path)
@@ -128,6 +123,17 @@ func (c *Client) newRequest(method, path string, body any) (*http.Request, error
 		fmt.Fprintf(os.Stderr, "> body: %s\n", redact(payload))
 	}
 	return req, nil
+}
+
+// applyHeaders sets the headers every request shares, regardless of how its
+// body is encoded.
+func (c *Client) applyHeaders(req *http.Request) {
+	if c.token != "" {
+		req.Header.Set("Authorization", BearerToken(c.token))
+	}
+	if c.lang != "" {
+		req.Header.Set("x-lang", c.lang)
+	}
 }
 
 // envelope matches the server's global response wrapper. Code is a pointer so
@@ -154,6 +160,10 @@ func (c *Client) Do(method, path string, body any) (json.RawMessage, error) {
 		return nil, httpStatusError(method, path, resp.StatusCode, raw)
 	}
 
+	return unwrap(raw)
+}
+
+func unwrap(raw []byte) (json.RawMessage, error) {
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil || env.Code == nil {
 		// Not an envelope; hand the body back untouched.
@@ -330,7 +340,10 @@ func redact(payload []byte) string {
 	if err := json.Unmarshal(payload, &parsed); err != nil {
 		return truncate(string(payload), 4096)
 	}
-	for _, key := range []string{"password", "oldPassword", "newPassword", "api-key", "apiKey", "token", "access_token", "openAiApiKey"} {
+	for _, key := range []string{
+		"password", "oldPassword", "newPassword", "api-key", "apiKey", "token",
+		"access_token", "openAiApiKey", "access_key_secret", "access_key_id",
+	} {
 		if _, ok := parsed[key]; ok {
 			parsed[key] = "****"
 		}

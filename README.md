@@ -12,7 +12,8 @@
 - **P1 看板 REST 轨** ✅ 列表、查看、导出/导入、版本回滚、布局、查询、刷新、筛选、上下文附件
 - **P1 看板 Agent 轨** ✅ 创建、编辑、提问、回答、取消
 - **P2 任务** ✅ 列表/查看、状态、置顶、取消、删除、DAG、原生 SQL、KPI SQL、证据、消息、工作区文件与归档、分享
-- 数据源、知识库、项目等其余模块待做，期间可用 `infini-cli api` 直调
+- **P2 资源面** ✅ 数据源（CRUD、连接测试、schema、上传、绑定）、知识库（CRUD、文档存储、绑定）、项目（CRUD、成员、文件）
+- 语义层（Context Hub）、技能/工具/规则、设置与运维等其余模块待做，期间可用 `infini-cli api` 直调
 
 ## 环境要求
 
@@ -173,6 +174,62 @@ infini-cli task share set t_1 --public     # 需确认：任何拿到链接的�
 infini-cli task share set t_1 --private
 ```
 
+## 数据源
+
+连接配置的字段随 `--type` 变，CLI 原样透传给服务端校验。`db test` 可以在保存之前先验证一份配置：
+
+```bash
+infini-cli db ls --type mysql --table
+infini-cli db add --name chinook --type sqlite --config '{"path":"/data/chinook.db"}'
+infini-cli db test --type mysql --config @mysql.json
+infini-cli db test --id db_1                    # 测已保存的那份
+infini-cli db schema db_1                       # 表、列，以及语义层对它的了解
+infini-cli db upload db_1 ./sales-2026.csv      # 仅 file 类型
+```
+
+`db update` 会先读当前记录、再只覆盖你传了的 flag——服务端的更新接口要整条记录，直接发部分字段会把没传的清空。
+
+启停是单独的命令：它存在按用户的映射表里，不在数据源本身上，`update` 会忽略它。
+
+```bash
+infini-cli db enable db_1 db_2
+infini-cli db disable db_1
+```
+
+## 知识库
+
+文档本身留在原处：本地路径，或 OSS / S3 / COS 桶。把知识库绑到数据源，是让 Agent 用文档来理解这个库的表。
+
+```bash
+infini-cli rag ls --all --table
+infini-cli rag create --name finance_docs --doc-dir /data/finance --ext pdf --ext md
+infini-cli rag bind-db rag_1 --db db_1 --db db_2   # 替换而非追加，不传则全部解绑
+infini-cli rag binds rag_1
+```
+
+文档存储按路径直接寻址，因为同一个目录可以撑起多个知识库。对象存储密钥只从 `INFINI_STORAGE_SECRET` 读，不提供 flag——命令行上的密钥会进 shell history 和进程列表：
+
+```bash
+export INFINI_STORAGE_SECRET=...
+infini-cli rag file ls --fs oss --dir docs/ --endpoint oss-cn-hangzhou.aliyuncs.com --access-key AKID
+infini-cli rag file get docs/q3.pdf --fs oss --access-key AKID --out ./downloads/
+infini-cli rag file rm docs/stale.pdf --fs oss --access-key AKID   # 仅 oss/s3/cos 支持删除
+```
+
+## 项目
+
+项目把任务、看板和文件圈到一组人身上，成员角色决定谁能改什么。角色有 `viewer`、`editor`、`manager`。
+
+```bash
+infini-cli project ls --table
+infini-cli project create "销售分析" --description "季度复盘"
+infini-cli project member add proj_1 user_7 --role editor
+infini-cli project member ls proj_1 --table
+infini-cli project tree proj_1
+infini-cli project file get proj_1 data/result.csv --out ./downloads/
+infini-cli project mkdir proj_1 data/raw
+```
+
 ## 配置
 
 配置文件默认在 `~/.infini-cli/config.yaml`，按 **profile** 组织，一个二进制可以在多个部署间切换：
@@ -294,6 +351,9 @@ infini-enterprise-cli/
 │   ├── config.go                # 配置、profile、doctor 自检
 │   ├── dash*.go                 # 看板：CRUD、spec 往返、版本布局、查询、刷新、Agent 创作
 │   ├── task*.go                 # 任务：生命周期、DAG 与证据溯源、工作区文件
+│   ├── db.go                    # 数据源：CRUD、连接测试、schema、上传、绑定
+│   ├── rag.go                   # 知识库：CRUD、文档存储、绑定
+│   ├── project.go               # 项目：CRUD、成员、文件树
 │   ├── api.go                   # 任意接口直调逃生舱
 │   ├── events.go                # SSE 事件流
 │   ├── helpers.go               # 参数解析、JSON 载荷读取
@@ -303,9 +363,12 @@ infini-enterprise-cli/
     ├── agent/                   # 异步命令状态机、SSE 流渲染、看板工具结果解析
     ├── auth/                    # proxy 登录链（md5 口令、JWT、profile）
     ├── cliexit/                 # 退出码与修复提示
-    ├── client/                  # HTTP 封装、响应信封解包、错误分类、SSE
+    ├── client/                  # HTTP 封装、信封解包、错误分类、SSE、流式上传下载
     ├── config/                  # 多 profile 配置与优先级解析
     ├── dashboard/               # 看板 REST 封装、spec 模型、filter 类型转换
     ├── task/                    # 任务 REST 封装、文件树、流式下载
+    ├── database/                # 数据源 REST 封装
+    ├── rag/                     # 知识库 REST 封装、文档存储描述
+    ├── project/                 # 项目 REST 封装
     └── output/                  # JSON / 表格输出
 ```

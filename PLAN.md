@@ -229,38 +229,48 @@ Agent 轨实现要点（`internal/agent`）：
 
 `/api/ai_database`：
 
-- [ ] `db ls` → `GET /list`
-- [ ] `db add` / `db update` → `POST /add`、`POST /update`
-- [ ] `db rm` → `POST /delete`
-- [ ] `db enable` / `db disable` → `POST /enabled`
-- [ ] `db test` → `POST /testConnection`
-- [ ] `db show <id|name>` → `GET /getDatabaseById/:id`、`GET /getDatabaseByName/:name`
-- [ ] `db schema <id>` → `GET /schema/:databaseId`
-- [ ] `db upload <id> <file>` → `POST /upload/:databaseId`（file 类型数据源）
-- [ ] `db bind-rag` / `db binds` → `POST /bindRags`、`GET /getBindRags/:databaseId`
-- [ ] `db review-list` → `GET /context-hub-review-databases`
+- [x] `db ls` → `GET /list`
+- [x] `db add` / `db update` → `POST /add`、`POST /update`
+- [x] `db rm` → `POST /delete`
+- [x] `db enable` / `db disable` → `POST /enabled`
+- [x] `db test` → `POST /testConnection`
+- [x] `db show <id|name>` → `GET /getDatabaseById/:id`、`GET /getDatabaseByName/:name`
+- [x] `db schema <id>` → `GET /schema/:databaseId`
+- [x] `db upload <id> <file>` → `POST /upload/:databaseId`（file 类型数据源）
+- [x] `db bind-rag` / `db binds` → `POST /bindRags`、`GET /getBindRags/:databaseId`
+- [x] `db review-list` → `GET /context-hub-review-databases`
 
 ### 4.6 `infini rag` — 知识库
 
 `/api/ai_rag_sdk`：
 
-- [ ] `rag ls` / `rag ls --all` → `GET /`、`GET /all`
-- [ ] `rag show <id>` → `GET /:id`
-- [ ] `rag create` / `rag update <id>` → `POST /create`、`POST /update/:id`
-- [ ] `rag rm` → `POST /delete`
-- [ ] `rag enable` / `rag disable` → `POST /enabled`
-- [ ] `rag file ls/download/rm` → `POST /fileTree`、`POST /download`、`POST /deleteRemoteFile`
-- [ ] `rag bind-db` / `rag binds` → `POST /bindDatabases`、`GET /getBindDatabases/:ragId`
+- [x] `rag ls` / `rag ls --all` → `GET /`、`GET /all`
+- [x] `rag show <id>` → `GET /:id`
+- [x] `rag create` / `rag update <id>` → `POST /create`、`POST /update/:id`
+- [x] `rag rm` → `POST /delete`
+- [x] `rag enable` / `rag disable` → `POST /enabled`
+- [x] `rag file ls/get/rm` → `POST /fileTree`、`POST /download`、`POST /deleteRemoteFile`
+- [x] `rag bind-db` / `rag binds` → `POST /bindDatabases`、`GET /getBindDatabases/:ragId`
 
 ### 4.7 `infini project` — 项目与成员
 
 `/api/ai_project`：
 
-- [ ] `project ls` / `create` / `update` / `rm` → `GET /list`、`POST /`、`PATCH /:projectId`、`DELETE /:projectId`
-- [ ] `project member ls/add/update/rm` → `/:projectId/members` 四个方法
-- [ ] `project tree` → `GET /:projectId/tree`
-- [ ] `project file preview/download/move/copy/rm` → 对应 4 个文件路由
-- [ ] `project mkdir` → `POST /:projectId/directories`
+- [x] `project ls` / `create` / `update` / `rm` → `GET /list`、`POST /`、`PATCH /:projectId`、`DELETE /:projectId`
+- [x] `project member ls/add/set/rm` → `/:projectId/members` 四个方法
+- [x] `project tree` → `GET /:projectId/tree`
+- [x] `project file preview/get/mv/cp/rm` → 对应 5 个文件路由
+- [x] `project mkdir` → `POST /:projectId/directories`
+
+#### db / rag / project 轨实现要点
+
+- **`enabled` 不在数据源表上**：它落在 `ai_database_mapping`（按用户），`update` 服务端会把它解构丢掉，所以启停只能走 `POST /enabled`，是批量的、独立的命令。
+- **`config` 与 `requiredExts` 的字符串化方向相反**：数据源 `config` 无论读写都是 JSON 文本；知识库 `requiredExts` 写入时是数组、读回时是 JSON 文本。CLI 两边都做转换。
+- **`db update` / `rag update` 先读后写**：服务端 DTO 要求整条记录（rag 的 update 直接复用 create DTO），直接发部分字段会把没传的字段清空。所以先 GET 当前记录，再只覆盖用户传了的 flag。`project update` 是 PATCH，不需要这一步。
+- **对象存储密钥只从环境变量读**：`rag file *` 的 `access_key_secret` 走 `INFINI_STORAGE_SECRET`，不提供 flag——命令行上的密钥会进 shell history 和进程列表。`--trace` 的脱敏名单也加了 `access_key_id` / `access_key_secret`。
+- **绑定是替换不是合并**：`db bind-rag` / `rag bind-db` 发全量列表，不传任何 id 等于全部解绑，因此这一步有确认门。
+- **`DELETE /:projectId/files` 带 body**：删文件/目录的路径在 body 里而不是 query，有测试钉住。
+- **上传走流式 multipart**：`client.Upload` 用 `io.Pipe` 边读边发，数据源上传动辄几百 MB；中途读失败用 `CloseWithError` 让请求带错终止，而不是发出一个被静默截断的 body。
 
 ### 4.8 `infini hub` — Context Hub（语义层）
 
@@ -366,9 +376,9 @@ REST 运维轨与 Agent 创作轨**同期交付**。
 ### P2 — 资源与数据面
 
 - [x] §4.3 task 全量（`public *` 一组挪到 P4）
-- [ ] §4.5 db 全量
-- [ ] §4.6 rag 全量
-- [ ] §4.7 project 全量
+- [x] §4.5 db 全量
+- [x] §4.6 rag 全量
+- [x] §4.7 project 全量
 - [ ] §4.8 hub 全量（含 KPI 与审核流）
 
 ### P3 — Agent 深度控制
