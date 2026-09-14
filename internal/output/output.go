@@ -51,11 +51,20 @@ func SetWriters(stdout, stderr io.Writer) { out, errOut = stdout, stderr }
 // Success prints a result payload. headers/toRows are optional; when supplied
 // and the format is table, the payload is rendered as a table instead.
 func Success(data any, headers []string, toRows func() [][]string) error {
+	return SuccessHint(data, "", headers, toRows)
+}
+
+// SuccessHint is Success with a hint on the envelope. Agents read hint from
+// stdout JSON; table mode still writes the table and puts the hint on stderr.
+func SuccessHint(data any, hint string, headers []string, toRows func() [][]string) error {
 	if current == FormatTable && headers != nil && toRows != nil {
 		Table(headers, toRows())
+		if hint != "" {
+			Note("%s", hint)
+		}
 		return nil
 	}
-	return JSON(Envelope{Success: true, DryRun: DryRun, Data: normalize(data)})
+	return JSON(Envelope{Success: true, DryRun: DryRun, Data: normalize(data), Hint: hint})
 }
 
 // Raw prints a payload without the envelope, for passthrough commands.

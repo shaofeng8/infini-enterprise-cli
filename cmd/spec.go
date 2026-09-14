@@ -26,8 +26,12 @@ Conventions that are not obvious from --help
 
 Output. Every command prints one JSON envelope on stdout:
 
-  {"success": true,  "data": ...,  "message": ""}
+  {"success": true,  "data": ...,  "message": "", "hint": "..."}
   {"success": false, "data": null, "message": "...", "hint": "..."}
+
+hint is optional. On success it appears when the payload is easy to misread
+(for example db ls --type dm with an empty list still carries data.typeGuide).
+On failure it tells you what to run next.
 
 Diagnostics, progress and warnings go to stderr, never stdout, so stdout is
 always parseable. List commands accept --table for human output; do not use it
@@ -149,14 +153,16 @@ Load a large file into a data source, resumably:
       --target-type database --target-id db_1 --post-action import_database
   infini-cli fs session push ./dump.csv --resume <uploadId>   # after a break
 
-Data source --config keys are driver-prefixed. infini-cli db add --help is
-the catalog; do not invent host/port/path. sqlite uses sqlite_path, Dameng
-(dm) uses dm_host/dm_port/dm_username/dm_password/dm_database (default port
-5236). Always db test before db add.
+Data source --config keys are driver-prefixed. Do not invent host/port, and
+do not treat "db ls --type dm" as the schema: ls lists saved sources. Run:
 
-================================================================================
-Things that will otherwise waste your time
-================================================================================
+  infini-cli db types
+  infini-cli db types dm
+
+If you already ran db ls --type dm, the JSON includes data.typeGuide even
+when items is empty. sqlite uses sqlite_path. Dameng (dm) uses dm_host,
+dm_port, dm_username, dm_password, dm_database (default port 5236). Always
+db test before db add.
 
 Check someone else's shared result:
 

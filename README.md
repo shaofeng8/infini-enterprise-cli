@@ -192,7 +192,12 @@ infini-cli task share set t_1 --private
 
 ## 数据源
 
-连接配置是一段 JSON，字段名按驱动加前缀（`dm_host`、`mysql_host`、`sqlite_path`），不是通用的 host/port/path。CLI 原样交给服务端。完整目录在 `infini-cli db add --help` 和 `infini-cli spec`。
+连接配置是一段 JSON，字段名按驱动加前缀（`dm_host`、`mysql_host`、`sqlite_path`），不是通用的 host/port/path。CLI 原样交给服务端。完整目录用 JSON 拿（给 AI 探测用），不要靠 `db ls --type dm` 去猜字段——ls 只列出已保存的源：
+
+```bash
+infini-cli db types
+infini-cli db types dm
+```
 
 保存前先测：
 

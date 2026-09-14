@@ -23,8 +23,9 @@ names are driver-prefixed (dm_host, mysql_host, sqlite_path) — not a generic
 host/port/path. The CLI passes --config through verbatim; the server stores it
 as a string and the inspector reads those exact keys.
 
-Run infini-cli db add --help for the full per-type catalog. db test checks a
-config before you save it.`,
+Run infini-cli db types (or db types dm) for the per-type --config catalog.
+db ls only lists saved sources; it is not how you discover field names.
+db test checks a config before you save it.`,
 }
 
 func dbAPI() (*database.API, error) {
@@ -41,7 +42,12 @@ var dbLsCmd = &cobra.Command{
 	Short:   "List data sources",
 	Long: `  infini-cli db ls --table
   infini-cli db ls --type mysql --enabled --table
-  infini-cli db ls --context-hub not_in --table   # sources with no semantic layer yet`,
+  infini-cli db ls --context-hub not_in --table   # sources with no semantic layer yet
+
+With --type, the JSON also includes typeGuide (required keys and an example).
+That is so an agent that probes with db ls --type dm still sees dm_host and
+friends, even when no Dameng source has been saved yet. For the full catalog
+use db types.`,
 	Args: exactArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		flags := cmd.Flags()
@@ -89,13 +95,81 @@ var dbLsCmd = &cobra.Command{
 			return err
 		}
 
-		return output.Success(result, []string{"ID", "NAME", "NICKNAME", "TYPE", "ENABLED", "SOURCE"}, func() [][]string {
+		payload := any(result)
+		hint := ""
+		if dbType != "" {
+			if guide, ok := database.GuideFor(dbType); ok {
+				payload = map[string]any{
+					"items":     result.Items,
+					"meta":      result.Meta,
+					"typeGuide": guide,
+				}
+				if len(result.Items) == 0 {
+					hint = "no saved " + guide.Type + " sources; --config keys are in data.typeGuide (required: " +
+						strings.Join(guide.Required, ", ") + "). Do not infer host/port from another driver. infini-cli db types " +
+						guide.Type + " prints the same catalog."
+				}
+			}
+		}
+
+		return output.SuccessHint(payload, hint, []string{"ID", "NAME", "NICKNAME", "TYPE", "ENABLED", "SOURCE"}, func() [][]string {
 			rows := make([][]string, 0, len(result.Items))
 			for _, item := range result.Items {
 				rows = append(rows, []string{
 					item.ID, item.Name, item.Nickname, item.Type,
 					intOrDash(item.Enabled), item.Source,
 				})
+			}
+			return rows
+		})
+	},
+}
+
+var dbTypesCmd = &cobra.Command{
+	Use:   "types [type]",
+	Short: "Show --config fields for each driver",
+	Long: `Prints the connection-config catalog as JSON. This is the command to run
+when adding a data source — not db ls, which only lists sources that already
+exist.
+
+  infini-cli db types
+  infini-cli db types dm
+  infini-cli db types --table
+
+Keys are driver-prefixed: Dameng is dm_host/dm_port/dm_username/dm_password/
+dm_database, not host/port/username.`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 1 {
+			guide, ok := database.GuideFor(args[0])
+			if !ok {
+				return unknownDatabaseType(args[0])
+			}
+			return output.Success(guide, []string{"FIELD", "VALUE"}, func() [][]string {
+				port := ""
+				if guide.DefaultPort != 0 {
+					port = fmt.Sprintf("%d", guide.DefaultPort)
+				}
+				return [][]string{
+					{"type", guide.Type},
+					{"title", guide.Title},
+					{"defaultPort", port},
+					{"required", strings.Join(guide.Required, ", ")},
+					{"optional", strings.Join(guide.Optional, ", ")},
+					{"example", guide.Example},
+					{"notes", guide.Notes},
+				}
+			})
+		}
+		guides := database.TypeGuides()
+		return output.Success(map[string]any{"types": guides}, []string{"TYPE", "TITLE", "PORT", "REQUIRED"}, func() [][]string {
+			rows := make([][]string, 0, len(guides))
+			for _, guide := range guides {
+				port := ""
+				if guide.DefaultPort != 0 {
+					port = fmt.Sprintf("%d", guide.DefaultPort)
+				}
+				rows = append(rows, []string{guide.Type, guide.Title, port, strings.Join(guide.Required, ", ")})
 			}
 			return rows
 		})
@@ -163,7 +237,19 @@ Inline JSON, @file or @- are all accepted. Test first:
 		configArg, _ := flags.GetString("config")
 
 		if name == "" || dbType == "" || configArg == "" {
-			return cliexit.Usage("--name, --type and --config are all required")
+			if dbType != "" {
+				if guide, ok := database.GuideFor(dbType); ok {
+					return cliexit.Hint(
+						cliexit.Usage("--name, --type and --config are all required"),
+						"%s --config example: %s; required keys: %s",
+						guide.Type, guide.Example, strings.Join(guide.Required, ", "),
+					)
+				}
+			}
+			return cliexit.Hint(
+				cliexit.Usage("--name, --type and --config are all required"),
+				"run `infini-cli db types` (or db types <type>) for the --config keys; do not infer host/port from another driver",
+			)
 		}
 		if !slices.Contains(database.Types, dbType) {
 			return unknownDatabaseType(dbType)
@@ -332,7 +418,7 @@ or an unsaved config with --type and --config.
   infini-cli db test --type dm --config @dm.json
   infini-cli db test --type mysql --config '{"mysql_host":"127.0.0.1","mysql_port":3306,"mysql_username":"root","mysql_password":"...","mysql_database":"sales"}'
 
-Field names are driver-prefixed. infini-cli db add --help lists every type.
+Field names are driver-prefixed. infini-cli db types lists every type.
 
 ` + database.ConfigGuide,
 	Args: exactArgs(0),
@@ -509,7 +595,7 @@ func readConfigArg(value string) (string, error) {
 }
 
 func unknownDatabaseType(dbType string) error {
-	hint := "known types: " + strings.Join(database.Types, ", ") + "; infini-cli db add --help lists the --config keys for each"
+	hint := "known types: " + strings.Join(database.Types, ", ") + "; infini-cli db types lists the --config keys for each"
 	if example := database.ConfigExample(dbType); example != "" {
 		hint += "; example: " + example
 	}
@@ -525,7 +611,7 @@ func addDatabaseSpecFlags(cmd *cobra.Command) {
 	flags.String("nickname", "", "Display name")
 	flags.String("type", "", "Driver type: "+strings.Join(database.Types, ", "))
 	flags.String("description", "", "Description")
-	flags.String("config", "", "Connection config as JSON, @file or @-; keys depend on --type, see db add --help")
+	flags.String("config", "", "Connection config as JSON, @file or @-; keys depend on --type, see db types")
 }
 
 func init() {
@@ -552,7 +638,7 @@ func init() {
 	dbBindRagCmd.Flags().StringSlice("rag", nil, "Knowledge base id (repeatable)")
 
 	dbCmd.AddCommand(
-		dbLsCmd, dbShowCmd, dbAddCmd, dbUpdateCmd, dbRmCmd,
+		dbLsCmd, dbTypesCmd, dbShowCmd, dbAddCmd, dbUpdateCmd, dbRmCmd,
 		dbEnableCmd, dbDisableCmd, dbTestCmd, dbSchemaCmd, dbUploadCmd,
 		dbBindsCmd, dbBindRagCmd, dbReviewListCmd,
 	)
