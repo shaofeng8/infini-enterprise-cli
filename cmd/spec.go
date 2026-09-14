@@ -99,8 +99,8 @@ Setup
   infini-cli auth login --username you@example.com        # prompts, no echo
   infini-cli config doctor                                # verify the chain
 
-If server is not set, it defaults to http://127.0.0.1:$APP_PORT, or
-http://127.0.0.1:8088 when APP_PORT is unset.
+If server is not set, it defaults to $APP_BASE_URL, or
+http://127.0.0.1:8088 when APP_BASE_URL is also unset.
 
 Credentials can also come from the environment (INFINI_TOKEN, INFINI_API_KEY,
 BUILTIN_SYSTEM_ACCESS_KEY) or from --token / --api-key. A password is

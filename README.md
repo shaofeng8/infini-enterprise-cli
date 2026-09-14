@@ -46,9 +46,9 @@ go test ./...
 ## 快速开始
 
 ```bash
-# 1. 指向目标部署（本地可省略：未配置时用 http://127.0.0.1:$APP_PORT，APP_PORT 未设则为 8088）
+# 1. 指向目标部署（本地可省略：未配置时用 $APP_BASE_URL，未设则为 http://127.0.0.1:8088）
 infini-cli config set server https://infini.example.com
-#    或：export APP_PORT=7001
+#    或：export APP_BASE_URL=http://127.0.0.1:7001
 
 
 # 2. 登录（auth/proxy 地址会自动从后端发现）
@@ -538,7 +538,7 @@ infini-cli --profile staging api GET /api/ai/dashboards   # 单次切换，不�
 
 | Key | 说明 |
 |---|---|
-| `server` | Infini 应用后端地址，所有业务接口都在其 `/api` 下。未配置时默认 `http://127.0.0.1:$APP_PORT`，`APP_PORT` 未设则为 `8088` |
+| `server` | Infini 应用后端地址，所有业务接口都在其 `/api` 下。未配置时默认读 `APP_BASE_URL`，未设则为 `http://127.0.0.1:8088` |
 | `console` | auth/proxy 服务地址，负责签发 JWT 与用户/模型数据 |
 | `api-key` | API Key 凭证 |
 | `token` | `auth login` 写入的 JWT |

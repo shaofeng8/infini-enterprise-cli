@@ -81,11 +81,11 @@ var envNames = map[string]string{
 }
 
 const (
-	// EnvAppPort is Infini's listen-port variable. The CLI's default server is
-	// http://127.0.0.1:$APP_PORT.
-	EnvAppPort = "APP_PORT"
-	// DefaultAppPort is used when APP_PORT is unset.
-	DefaultAppPort = "8088"
+	// EnvAppBaseURL is Infini's public base URL. When server is not configured,
+	// the CLI uses this as-is (scheme, host and port included).
+	EnvAppBaseURL = "APP_BASE_URL"
+	// DefaultServer is used when APP_BASE_URL is also unset.
+	DefaultServer = "http://127.0.0.1:8088"
 )
 
 // EnvBuiltinSystemAccessKey is Infini's name for a process-level system
@@ -202,7 +202,7 @@ func Get(key string) string {
 		return v
 	}
 	if key == KeyServer {
-		return localServerFromAppPort()
+		return defaultServer()
 	}
 	// api-key only: Infini already injects this into the process. Last resort
 	// after INFINI_API_KEY and a stored key, so a logged-in or configured
@@ -218,14 +218,14 @@ func Get(key string) string {
 	return defaults[key]
 }
 
-// localServerFromAppPort is the local-dev default: http://127.0.0.1 plus
-// APP_PORT, or 8088 when APP_PORT is not set.
-func localServerFromAppPort() string {
-	port := strings.TrimSpace(os.Getenv(EnvAppPort))
-	if port == "" {
-		port = DefaultAppPort
+// defaultServer is the local-dev fallback: Infini's APP_BASE_URL as-is,
+// or http://127.0.0.1:8088 when that is also unset. The value already carries
+// the port, so APP_PORT is not consulted.
+func defaultServer() string {
+	if v := strings.TrimRight(strings.TrimSpace(os.Getenv(EnvAppBaseURL)), "/"); v != "" {
+		return v
 	}
-	return "http://127.0.0.1:" + port
+	return DefaultServer
 }
 
 // Set records a process-lifetime override, used for global flags.

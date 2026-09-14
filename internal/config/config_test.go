@@ -19,7 +19,7 @@ func isolateEnv(t *testing.T) {
 	}
 	t.Setenv("INFINI_PROFILE", "")
 	t.Setenv(EnvBuiltinSystemAccessKey, "")
-	t.Setenv(EnvAppPort, "")
+	t.Setenv(EnvAppBaseURL, "")
 }
 
 // useTempConfig points the package at an isolated config file.
@@ -57,21 +57,21 @@ func TestGetPrecedence(t *testing.T) {
 	}
 }
 
-func TestServerDefaultsToLoopbackAppPort(t *testing.T) {
+func TestServerDefaultsToAppBaseURL(t *testing.T) {
 	useTempConfig(t)
 
-	if got := Server(); got != "http://127.0.0.1:"+DefaultAppPort {
-		t.Fatalf("unset APP_PORT should default to %s, got %q", DefaultAppPort, got)
+	if got := Server(); got != DefaultServer {
+		t.Fatalf("unset APP_BASE_URL should default to %s, got %q", DefaultServer, got)
 	}
 
-	t.Setenv(EnvAppPort, "7001")
-	if got := Server(); got != "http://127.0.0.1:7001" {
-		t.Fatalf("got %q, want http://127.0.0.1:7001", got)
+	t.Setenv(EnvAppBaseURL, "http://localhost:7001/")
+	if got := Server(); got != "http://localhost:7001" {
+		t.Fatalf("got %q, want http://localhost:7001", got)
 	}
 
 	t.Setenv("INFINI_SERVER", "https://env.example.com")
 	if got := Server(); got != "https://env.example.com" {
-		t.Fatalf("INFINI_SERVER should beat APP_PORT: got %q", got)
+		t.Fatalf("INFINI_SERVER should beat APP_BASE_URL: got %q", got)
 	}
 }
 
