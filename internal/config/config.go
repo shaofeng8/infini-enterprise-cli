@@ -80,6 +80,25 @@ var envNames = map[string]string{
 	KeyUpdateChannel:  "INFINI_UPDATE_CHANNEL",
 }
 
+const (
+	// EnvAppPort is Infini's listen-port variable. The CLI's default server is
+	// http://127.0.0.1:$APP_PORT.
+	EnvAppPort = "APP_PORT"
+	// DefaultAppPort is used when APP_PORT is unset.
+	DefaultAppPort = "8088"
+)
+
+// EnvBuiltinSystemAccessKey is Infini's name for a process-level system
+// api-key. Worker and local-dev shells already export it; treating it as a
+// last-resort credential lets the CLI talk to a running instance without
+// `auth login`.
+const EnvBuiltinSystemAccessKey = "BUILTIN_SYSTEM_ACCESS_KEY"
+
+// BakedAPIKey is empty in normal builds. A throwaway test binary may inject one
+// with -ldflags so testers can skip login. It is last resort after the
+// environment and the profile, and must never be committed as a real value.
+var BakedAPIKey = ""
+
 // SupportedLanguages mirrors the server's i18n directories.
 var SupportedLanguages = []string{"en", "zh_CN", "ar", "ja", "ko", "ru"}
 
@@ -182,7 +201,31 @@ func Get(key string) string {
 	if v, ok := loaded.Profiles[active][key]; ok && v != "" {
 		return v
 	}
+	if key == KeyServer {
+		return localServerFromAppPort()
+	}
+	// api-key only: Infini already injects this into the process. Last resort
+	// after INFINI_API_KEY and a stored key, so a logged-in or configured
+	// session cannot be silently replaced by the built-in one.
+	if key == KeyAPIKey {
+		if v := os.Getenv(EnvBuiltinSystemAccessKey); v != "" {
+			return v
+		}
+		if BakedAPIKey != "" {
+			return BakedAPIKey
+		}
+	}
 	return defaults[key]
+}
+
+// localServerFromAppPort is the local-dev default: http://127.0.0.1 plus
+// APP_PORT, or 8088 when APP_PORT is not set.
+func localServerFromAppPort() string {
+	port := strings.TrimSpace(os.Getenv(EnvAppPort))
+	if port == "" {
+		port = DefaultAppPort
+	}
+	return "http://127.0.0.1:" + port
 }
 
 // Set records a process-lifetime override, used for global flags.
@@ -306,8 +349,14 @@ func Snapshot(showSecrets bool) map[string]string {
 
 // Credential returns the bearer value and which kind of credential it is.
 //
-// A JWT from `auth login` wins over a stored api-key, but an explicitly passed
-// --api-key always wins over both.
+// Precedence, high to low:
+//
+//  1. --api-key
+//  2. --token
+//  3. a JWT from `auth login` (or INFINI_TOKEN)
+//  4. a stored / INFINI_API_KEY api-key
+//  5. BUILTIN_SYSTEM_ACCESS_KEY, which Infini already puts in the process
+//     environment so a local CLI can skip login
 func Credential() (value string, kind string) {
 	if v := overrides[KeyAPIKey]; v != "" {
 		return v, KeyAPIKey

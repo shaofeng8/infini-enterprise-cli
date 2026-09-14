@@ -56,7 +56,7 @@ func New() (*Client, error) {
 	if token == "" {
 		return nil, cliexit.Hint(
 			cliexit.New(cliexit.CodeAuth, "no credential configured"),
-			"run `%s auth login` or pass --api-key", config.AppName,
+			"run `%s auth login`, pass --api-key, or export INFINI_API_KEY / BUILTIN_SYSTEM_ACCESS_KEY", config.AppName,
 		)
 	}
 	return newClient(server, token), nil

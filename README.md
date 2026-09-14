@@ -46,8 +46,10 @@ go test ./...
 ## 快速开始
 
 ```bash
-# 1. 指向目标部署
+# 1. 指向目标部署（本地可省略：未配置时用 http://127.0.0.1:$APP_PORT，APP_PORT 未设则为 8088）
 infini-cli config set server https://infini.example.com
+#    或：export APP_PORT=7001
+
 
 # 2. 登录（auth/proxy 地址会自动从后端发现）
 infini-cli auth login --username alice@example.com
@@ -536,7 +538,7 @@ infini-cli --profile staging api GET /api/ai/dashboards   # 单次切换，不�
 
 | Key | 说明 |
 |---|---|
-| `server` | Infini 应用后端地址，所有业务接口都在其 `/api` 下 |
+| `server` | Infini 应用后端地址，所有业务接口都在其 `/api` 下。未配置时默认 `http://127.0.0.1:$APP_PORT`，`APP_PORT` 未设则为 `8088` |
 | `console` | auth/proxy 服务地址，负责签发 JWT 与用户/模型数据 |
 | `api-key` | API Key 凭证 |
 | `token` | `auth login` 写入的 JWT |
@@ -562,6 +564,8 @@ infini-cli auth logout
 ```
 
 同时存在 JWT 和 API Key 时，JWT 优先；显式传入的 `--api-key` 优先于两者。
+
+本地开发还可以直接导出 Infini 进程里的 `BUILTIN_SYSTEM_ACCESS_KEY`，CLI 会把它当作最后一档 api-key，不必 `auth login`。`INFINI_API_KEY` 和登录 JWT 都会盖过它。
 
 ## 输出与退出码
 

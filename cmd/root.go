@@ -43,6 +43,9 @@ Quick start:
   infini-cli config doctor
   infini-cli dash ls
 
+Locally, if server is unset, it is http://127.0.0.1:$APP_PORT (8088 when
+APP_PORT is unset). A process with BUILTIN_SYSTEM_ACCESS_KEY can skip login.
+
 Every command prints a JSON envelope by default ({success, data, message}) and
 accepts --table for human-readable list output.`,
 	SilenceUsage:  true,

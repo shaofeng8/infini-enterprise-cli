@@ -276,7 +276,7 @@ func runDoctor() []check {
 
 	credential, kind := config.Credential()
 	if credential == "" {
-		checks = append(checks, check{"credential", "fail", "none stored; run `" + config.AppName + " auth login`"})
+		checks = append(checks, check{"credential", "fail", "none stored; run `" + config.AppName + " auth login`, pass --api-key, or export INFINI_API_KEY / BUILTIN_SYSTEM_ACCESS_KEY"})
 		return checks
 	}
 	checks = append(checks, check{"credential", "ok", kind + " " + config.Mask(credential)})

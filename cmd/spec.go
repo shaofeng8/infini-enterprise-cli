@@ -67,6 +67,9 @@ the process list. These come from the environment instead:
   INFINI_INTERNAL_TOKEN   worker drain token
   INFINI_TOKEN            JWT, as an alternative to a stored credential
   INFINI_API_KEY          API key, same
+  BUILTIN_SYSTEM_ACCESS_KEY
+                        Infini's process-level system api-key. Last resort
+                        after INFINI_API_KEY, so a local CLI can skip login.
 
 Destructive commands confirm first. In a non-interactive run they refuse
 unless --yes is passed, so a script cannot delete something by accident.
@@ -96,8 +99,11 @@ Setup
   infini-cli auth login --username you@example.com        # prompts, no echo
   infini-cli config doctor                                # verify the chain
 
-Credentials can also come from the environment (INFINI_TOKEN, INFINI_API_KEY)
-or from --token / --api-key, which is what CI usually does. A password is
+If server is not set, it defaults to http://127.0.0.1:$APP_PORT, or
+http://127.0.0.1:8088 when APP_PORT is unset.
+
+Credentials can also come from the environment (INFINI_TOKEN, INFINI_API_KEY,
+BUILTIN_SYSTEM_ACCESS_KEY) or from --token / --api-key. A password is
 never accepted as a flag; use --password-stdin.
 
 Several deployments at once are handled with profiles:
