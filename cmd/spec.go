@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/chaozwn/infini-enterprise-cli/internal/config"
+	"github.com/chaozwn/infini-enterprise-cli/internal/database"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -148,6 +149,15 @@ Load a large file into a data source, resumably:
       --target-type database --target-id db_1 --post-action import_database
   infini-cli fs session push ./dump.csv --resume <uploadId>   # after a break
 
+Data source --config keys are driver-prefixed. infini-cli db add --help is
+the catalog; do not invent host/port/path. sqlite uses sqlite_path, Dameng
+(dm) uses dm_host/dm_port/dm_username/dm_password/dm_database (default port
+5236). Always db test before db add.
+
+================================================================================
+Things that will otherwise waste your time
+================================================================================
+
 Check someone else's shared result:
 
   infini-cli task public show <taskId>
@@ -201,6 +211,12 @@ platform operations.
 		out.WriteString("Command inventory\n")
 		out.WriteString("================================================================================\n\n")
 		writeCommands(&out, rootCmd)
+
+		out.WriteString("================================================================================\n")
+		out.WriteString("Data source --config catalog\n")
+		out.WriteString("================================================================================\n\n")
+		out.WriteString(database.ConfigGuide)
+		out.WriteString("\n")
 
 		_, err := os.Stdout.WriteString(out.String())
 		return err

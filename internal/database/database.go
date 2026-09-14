@@ -13,11 +13,19 @@ import (
 
 const BasePath = "/api/ai_database"
 
-// Types the server accepts, from DatabaseQueryDto.
+// Types the add/update DTO accepts, from DatabaseAddDto.
 var Types = []string{
 	"mysql", "postgres", "snowflake", "gbase8a", "clickhouse", "dm", "supabase",
 	"file", "deltalake", "sqlite", "duckdb", "doris", "starrocks", "kingbase",
 	"sqlserver", "oracle",
+}
+
+// TestTypes is what DatabaseTestConnectionDto accepts. It is a superset of
+// Types: mongodb and elasticsearch can be probed even when add rejects them.
+var TestTypes = []string{
+	"mysql", "postgres", "snowflake", "gbase8a", "clickhouse", "dm", "supabase",
+	"file", "deltalake", "sqlite", "duckdb", "doris", "starrocks", "kingbase",
+	"sqlserver", "oracle", "mongodb", "elasticsearch",
 }
 
 var Sources = []string{"local", "remote", "all"}

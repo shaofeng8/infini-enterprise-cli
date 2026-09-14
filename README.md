@@ -192,14 +192,51 @@ infini-cli task share set t_1 --private
 
 ## 数据源
 
-连接配置的字段随 `--type` 变，CLI 原样透传给服务端校验。`db test` 可以在保存之前先验证一份配置：
+连接配置是一段 JSON，字段名按驱动加前缀（`dm_host`、`mysql_host`、`sqlite_path`），不是通用的 host/port/path。CLI 原样交给服务端。完整目录在 `infini-cli db add --help` 和 `infini-cli spec`。
+
+保存前先测：
+
+```bash
+infini-cli db test --type dm --config @dm.json
+infini-cli db add --name dameng_prod --type dm --config @dm.json --nickname 达梦生产
+```
+
+达梦（`--type dm`，默认端口 5236）：
+
+```json
+{
+  "dm_host": "127.0.0.1",
+  "dm_port": 5236,
+  "dm_username": "SYSDBA",
+  "dm_password": "...",
+  "dm_database": "DAMENG",
+  "deep_optimization": true
+}
+```
+
+MySQL（`--type mysql`，默认端口 3306）：
+
+```json
+{
+  "mysql_host": "127.0.0.1",
+  "mysql_port": 3306,
+  "mysql_username": "root",
+  "mysql_password": "...",
+  "mysql_database": "sales",
+  "deep_optimization": true
+}
+```
+
+SQLite 用 `sqlite_path`，不是 `path`：
+
+```bash
+infini-cli db add --name chinook --type sqlite --config '{"sqlite_path":"/data/chinook.sqlite"}'
+```
 
 ```bash
 infini-cli db ls --type mysql --table
-infini-cli db add --name chinook --type sqlite --config '{"path":"/data/chinook.db"}'
-infini-cli db test --type mysql --config @mysql.json
-infini-cli db test --id db_1                    # 测已保存的那份
-infini-cli db schema db_1                       # 表、列，以及语义层对它的了解
+infini-cli db test --id db_1
+infini-cli db schema db_1
 infini-cli db upload db_1 ./sales-2026.csv      # 仅 file 类型
 ```
 

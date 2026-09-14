@@ -18,9 +18,13 @@ var dbCmd = &cobra.Command{
 	Short: "Manage data sources",
 	Long: `Data sources are the databases and file stores the agent queries.
 
-Connection details live in a JSON config whose shape depends on --type, so the
-CLI passes it through verbatim and lets the server validate it. ` + "`db test`" + `
-checks a config before you save it.`,
+Connection details live in a JSON config whose shape depends on --type. Field
+names are driver-prefixed (dm_host, mysql_host, sqlite_path) — not a generic
+host/port/path. The CLI passes --config through verbatim; the server stores it
+as a string and the inspector reads those exact keys.
+
+Run infini-cli db add --help for the full per-type catalog. db test checks a
+config before you save it.`,
 }
 
 func dbAPI() (*database.API, error) {
@@ -44,7 +48,7 @@ var dbLsCmd = &cobra.Command{
 
 		dbType, _ := flags.GetString("type")
 		if dbType != "" && !slices.Contains(database.Types, dbType) {
-			return cliexit.Usage("unknown type %q, expected one of: %s", dbType, strings.Join(database.Types, ", "))
+			return unknownDatabaseType(dbType)
 		}
 		source, _ := flags.GetString("source")
 		if source != "" && !slices.Contains(database.Sources, source) {
@@ -140,11 +144,17 @@ var dbShowCmd = &cobra.Command{
 var dbAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Add a data source",
-	Long: `The --config payload is passed through to the server, which validates it
-against the driver for --type.
+	Long: `Creates a data source. --name, --type and --config are required.
 
-  infini-cli db add --name chinook --type sqlite --config '{"path":"/data/chinook.db"}'
-  infini-cli db add --name warehouse --type mysql --config @mysql.json --nickname 数仓`,
+--config is a JSON object whose keys depend on --type (see the catalog below).
+Inline JSON, @file or @- are all accepted. Test first:
+
+  infini-cli db test --type dm --config @dm.json
+  infini-cli db add --name dameng_prod --type dm --config @dm.json --nickname 达梦生产
+  infini-cli db add --name chinook --type sqlite --config '{"sqlite_path":"/data/chinook.sqlite"}'
+  infini-cli db add --name warehouse --type mysql --config @mysql.json --nickname 数仓
+
+` + database.ConfigGuide,
 	Args: exactArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		flags := cmd.Flags()
@@ -156,7 +166,7 @@ against the driver for --type.
 			return cliexit.Usage("--name, --type and --config are all required")
 		}
 		if !slices.Contains(database.Types, dbType) {
-			return cliexit.Usage("unknown type %q, expected one of: %s", dbType, strings.Join(database.Types, ", "))
+			return unknownDatabaseType(dbType)
 		}
 		config, err := readConfigArg(configArg)
 		if err != nil {
@@ -246,7 +256,7 @@ per-user mapping, not on the data source itself, and update ignores it.`,
 		if flags.Changed("type") {
 			dbType, _ := flags.GetString("type")
 			if !slices.Contains(database.Types, dbType) {
-				return cliexit.Usage("unknown type %q, expected one of: %s", dbType, strings.Join(database.Types, ", "))
+				return unknownDatabaseType(dbType)
 			}
 			spec.Type = dbType
 		}
@@ -319,7 +329,12 @@ var dbTestCmd = &cobra.Command{
 or an unsaved config with --type and --config.
 
   infini-cli db test --id db_1
-  infini-cli db test --type mysql --config @mysql.json`,
+  infini-cli db test --type dm --config @dm.json
+  infini-cli db test --type mysql --config '{"mysql_host":"127.0.0.1","mysql_port":3306,"mysql_username":"root","mysql_password":"...","mysql_database":"sales"}'
+
+Field names are driver-prefixed. infini-cli db add --help lists every type.
+
+` + database.ConfigGuide,
 	Args: exactArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		flags := cmd.Flags()
@@ -347,6 +362,9 @@ or an unsaved config with --type and --config.
 			}
 			dbType, config = current.Type, current.Config
 		} else {
+			if !slices.Contains(database.TestTypes, dbType) {
+				return unknownDatabaseType(dbType)
+			}
 			if config, err = readConfigArg(configArg); err != nil {
 				return err
 			}
@@ -490,13 +508,24 @@ func readConfigArg(value string) (string, error) {
 	return string(compact), nil
 }
 
+func unknownDatabaseType(dbType string) error {
+	hint := "known types: " + strings.Join(database.Types, ", ") + "; infini-cli db add --help lists the --config keys for each"
+	if example := database.ConfigExample(dbType); example != "" {
+		hint += "; example: " + example
+	}
+	return cliexit.Hint(
+		cliexit.Usage("unknown type %q", dbType),
+		"%s", hint,
+	)
+}
+
 func addDatabaseSpecFlags(cmd *cobra.Command) {
 	flags := cmd.Flags()
 	flags.String("name", "", "Unique data source name used in SQL")
 	flags.String("nickname", "", "Display name")
 	flags.String("type", "", "Driver type: "+strings.Join(database.Types, ", "))
 	flags.String("description", "", "Description")
-	flags.String("config", "", "Connection config as JSON, @file or @-")
+	flags.String("config", "", "Connection config as JSON, @file or @-; keys depend on --type, see db add --help")
 }
 
 func init() {
